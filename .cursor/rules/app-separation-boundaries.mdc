@@ -1,0 +1,13 @@
+---
+description: Enforce strict app boundaries in monorepo
+alwaysApply: true
+---
+
+# App Separation Boundaries
+
+- Treat `apps/admin-app`, `apps/manager-app`, and `apps/client-app` as isolated products.
+- Never import source files directly from one app into another app.
+- Cross-app reusable code must live in `packages/shared` (or another shared package), then be imported from there.
+- Keep each app's auth flow, layout shell, and route tree private to that app.
+- Avoid shared global CSS between apps; reuse tokens/components via package exports, not by importing app `index.css`.
+- Before finishing work, run `npm run check:boundaries` and the relevant app lint/build command.

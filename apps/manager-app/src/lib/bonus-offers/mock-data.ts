@@ -1,0 +1,58 @@
+import type { BonusOffer } from "@/lib/bonus-offers/types";
+
+export const BONUS_OFFERS_MOCK: BonusOffer[] = [
+  {
+    id: "offer-1",
+    program: "Livelo",
+    store: "Nike",
+    multiplier: 10,
+    validUntil: "2026-04-30",
+    conditions: "Válido para compras acima de R$ 199 via hotsite oficial.",
+    offerUrl: "https://example.com/oferta/livelo-nike",
+  },
+  {
+    id: "offer-2",
+    program: "Smiles",
+    store: "Magazine Luiza",
+    multiplier: 12,
+    validUntil: "2026-04-18",
+    conditions: "Pontuação em até 45 dias para produtos vendidos e entregues pelo parceiro.",
+    offerUrl: "https://example.com/oferta/smiles-magalu",
+  },
+  {
+    id: "offer-3",
+    program: "LATAM Pass",
+    store: "Netshoes",
+    multiplier: 8,
+    validUntil: "2026-04-12",
+    conditions: "Exclusivo para clientes logados com CPF vinculado ao programa.",
+    offerUrl: "https://example.com/oferta/latam-netshoes",
+  },
+  {
+    id: "offer-4",
+    program: "Azul Fidelidade",
+    store: "Casas Bahia",
+    multiplier: 15,
+    validUntil: "2026-05-05",
+    conditions: "Não cumulativo com cupom externo. Bonificação limitada a 20 mil pontos.",
+    offerUrl: "https://example.com/oferta/azul-casasbahia",
+  },
+  {
+    id: "offer-5",
+    program: "Livelo",
+    store: "Amazon",
+    multiplier: 7,
+    validUntil: "2026-04-22",
+    conditions: "Apenas categorias elegíveis conforme regulamento da campanha.",
+    offerUrl: "https://example.com/oferta/livelo-amazon",
+  },
+  {
+    id: "offer-6",
+    program: "LATAM Pass",
+    store: "Centauro",
+    multiplier: 16,
+    validUntil: "2026-04-25",
+    conditions: "Oferta em destaque para app e site. Não válido para gift card.",
+    offerUrl: "https://example.com/oferta/latam-centauro",
+  },
+];
