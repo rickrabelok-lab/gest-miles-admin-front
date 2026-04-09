@@ -1,0 +1,11 @@
+{
+  "name": "@gest-miles/core",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./index.ts",
+    "./viagens": "./viagens.ts"
+  }
+}

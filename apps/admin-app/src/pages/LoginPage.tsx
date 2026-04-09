@@ -12,7 +12,14 @@ import {
   adminSecurityIsEmailLocked,
   adminSecurityOnFailedLogin,
   adminSecurityOnLoginSuccess,
+  formatSupabaseError,
 } from "@/lib/adminApi";
+import { isSupabaseConfigured } from "@/lib/supabase";
+
+function loginFailureMessage(err: unknown): string {
+  const m = formatSupabaseError(err).trim();
+  return m || "Falha no login";
+}
 
 export default function LoginPage() {
   const { getString } = useAppConfig();
@@ -64,6 +71,13 @@ export default function LoginPage() {
           <CardDescription>Entre com a conta que tem role admin.</CardDescription>
         </CardHeader>
         <CardContent>
+        {!isSupabaseConfigured ? (
+          <p className="mb-3 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            Defina <code className="font-mono text-xs">VITE_SUPABASE_URL</code> e{" "}
+            <code className="font-mono text-xs">VITE_SUPABASE_ANON_KEY</code> em{" "}
+            <code className="font-mono text-xs">apps/admin-app/.env.local</code> e reinicie o Vite.
+          </p>
+        ) : null}
         <form
           className="space-y-3"
           onSubmit={async (e) => {
@@ -109,13 +123,13 @@ export default function LoginPage() {
                     const human = new Date(r.lockedUntil).toLocaleString("pt-BR");
                     setError(`Muitas tentativas falhadas. Conta bloqueada até ${human}.`);
                   } else {
-                    setError(err instanceof Error ? err.message : "Falha no login");
+                    setError(loginFailureMessage(err));
                   }
                 } catch {
-                  setError(err instanceof Error ? err.message : "Falha no login");
+                  setError(loginFailureMessage(err));
                 }
               } else {
-                setError(err instanceof Error ? err.message : "Falha no login");
+                setError(loginFailureMessage(err));
               }
             } finally {
               setPending(false);

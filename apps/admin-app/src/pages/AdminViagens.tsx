@@ -1,356 +1,377 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
+
+import { getStatusViagem, groupViagensByDestino, groupViagensTimelineByDataIda } from "@gest-miles/core";
+import { listViagensDashboard, type ViagemDashboardItem } from "@gest-miles/services";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useAdminEquipe } from "@/context/AdminEquipeContext";
-import {
-  formatSupabaseError,
-  listPerfis,
-  listViagens,
-  markViagemMensagemEnviada,
-  updateViagemStatus,
-  type Viagem,
-  type ViagemStatus,
-} from "@/lib/adminApi";
+import { formatSupabaseError } from "@/lib/adminApi";
 
-type DateFilter = "hoje" | "semana" | "mes";
-type MsgTipo = "pre_viagem" | "chegada" | "pos_viagem";
+const AdminViagensRadarMap = lazy(() => import("@/components/admin/AdminViagensRadarMap"));
 
-function toISODate(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+type TipoUsuarioFiltro = "todos" | "clientes" | "clientes_gestao";
+type MapaStatusFiltro = "todas" | "planejada" | "em_andamento" | "finalizada";
+
+function ymd(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function mondayOfWeek(d: Date): Date {
-  const copy = new Date(d);
-  const day = copy.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  copy.setDate(copy.getDate() + diff);
-  copy.setHours(0, 0, 0, 0);
-  return copy;
+function addDays(base: Date, days: number): Date {
+  const d = new Date(base);
+  d.setDate(d.getDate() + days);
+  return d;
 }
 
-function endOfWeek(d: Date): Date {
-  const m = mondayOfWeek(d);
-  const e = new Date(m);
-  e.setDate(m.getDate() + 6);
-  e.setHours(23, 59, 59, 999);
-  return e;
-}
-
-function endOfMonth(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
-}
-
-function computeStatus(v: Viagem, todayISO: string): ViagemStatus {
-  if (v.status === "chegada_confirmada") return "chegada_confirmada";
-  if (v.status === "finalizada") return "finalizada";
-  if (todayISO < v.data_ida) return "planejada";
-  if (todayISO > v.data_volta) return "finalizada";
-  return "em_andamento";
-}
-
-function statusBadge(status: ViagemStatus): { label: string; className: string } {
-  if (status === "planejada") return { label: "🟡 planejada", className: "bg-amber-50 text-amber-700 border-amber-200" };
-  if (status === "em_andamento") return { label: "🔵 em viagem", className: "bg-blue-50 text-blue-700 border-blue-200" };
-  if (status === "chegada_confirmada") return { label: "🟢 chegada confirmada", className: "bg-emerald-50 text-emerald-700 border-emerald-200" };
-  return { label: "⚫ finalizada", className: "bg-zinc-100 text-zinc-700 border-zinc-300" };
+function statusLabel(status: "planejada" | "em_andamento" | "finalizada"): string {
+  if (status === "em_andamento") return "em andamento";
+  if (status === "finalizada") return "finalizada";
+  return "planejada";
 }
 
 export default function AdminViagensPage() {
-  const { selectedEquipeId } = useAdminEquipe();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [viagens, setViagens] = useState<Viagem[]>([]);
-  const [clienteNomeById, setClienteNomeById] = useState<Record<string, string>>({});
-  const [destinoSearch, setDestinoSearch] = useState("");
-  const [dateFilter, setDateFilter] = useState<DateFilter>("semana");
-  const [sendingId, setSendingId] = useState<string | null>(null);
-  const [statusSavingId, setStatusSavingId] = useState<string | null>(null);
+  const [rows, setRows] = useState<ViagemDashboardItem[]>([]);
+  const [tipoUsuario, setTipoUsuario] = useState<TipoUsuarioFiltro>("todos");
+  const [equipeFilter, setEquipeFilter] = useState<string>("all");
+  const [gestorFilter, setGestorFilter] = useState<string>("all");
+  const [destinoFilter, setDestinoFilter] = useState("");
+  const [periodoInicio, setPeriodoInicio] = useState("");
+  const [periodoFim, setPeriodoFim] = useState("");
+  const [mapaStatusFiltro, setMapaStatusFiltro] = useState<MapaStatusFiltro>("todas");
 
-  const today = new Date();
-  const todayISO = toISODate(today);
-
-  const refresh = async () => {
-    if (!selectedEquipeId) {
-      setViagens([]);
-      setClienteNomeById({});
-      setLoading(false);
-      setError(null);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const rows = await listViagens({ equipeId: selectedEquipeId, destino: destinoSearch });
-      setViagens(rows);
-      const clienteIds = [...new Set(rows.map((r) => r.cliente_id).filter(Boolean))];
-      if (!clienteIds.length) {
-        setClienteNomeById({});
-      } else {
-        const perfis = await listPerfis();
-        const map: Record<string, string> = {};
-        for (const p of perfis) map[p.usuario_id] = p.nome_completo ?? p.usuario_id;
-        setClienteNomeById(map);
-      }
-    } catch (e) {
-      setError(formatSupabaseError(e));
-    } finally {
-      setLoading(false);
-    }
-  };
+  const hoje = ymd(new Date());
 
   useEffect(() => {
-    void refresh();
-    const id = setInterval(() => {
-      void refresh();
-    }, 30000);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedEquipeId, destinoSearch]);
+    let mounted = true;
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await listViagensDashboard({
+          equipeId: equipeFilter !== "all" ? equipeFilter : undefined,
+          gestorId: gestorFilter !== "all" ? gestorFilter : undefined,
+          tipoUsuario,
+          periodoInicio: periodoInicio || undefined,
+          periodoFim: periodoFim || undefined,
+          destino: destinoFilter || undefined,
+        });
+        if (mounted) setRows(data);
+      } catch (e) {
+        if (mounted) setError(formatSupabaseError(e));
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      mounted = false;
+    };
+  }, [tipoUsuario, equipeFilter, gestorFilter, destinoFilter, periodoInicio, periodoFim]);
 
-  const viagensFiltradasData = useMemo(() => {
-    const t = new Date();
-    const startISO = toISODate(t);
-    const startWeekISO = toISODate(mondayOfWeek(t));
-    const endWeekISO = toISODate(endOfWeek(t));
-    const endMonthISO = toISODate(endOfMonth(t));
-    return viagens.filter((v) => {
-      if (dateFilter === "hoje") return v.data_ida === startISO || (v.data_ida <= startISO && v.data_volta >= startISO);
-      if (dateFilter === "semana") return v.data_ida >= startWeekISO && v.data_ida <= endWeekISO;
-      return v.data_ida >= startISO.slice(0, 8) + "01" && v.data_ida <= endMonthISO;
-    });
-  }, [viagens, dateFilter]);
-
-  const normalized = useMemo(
-    () =>
-      viagensFiltradasData.map((v) => ({
+  const enriched = useMemo(() => {
+    return rows.map((v) => {
+      const status = getStatusViagem({ data_ida: v.data_ida, data_volta: v.data_volta });
+      return {
         ...v,
-        computedStatus: computeStatus(v, todayISO),
-        clienteNome: clienteNomeById[v.cliente_id] ?? v.cliente_id,
-      })),
-    [viagensFiltradasData, todayISO, clienteNomeById],
-  );
+        status,
+        viagemHoje: v.data_ida === hoje,
+        chegadaHoje: v.data_ida === hoje,
+        retornoHoje: v.data_volta === hoje,
+      };
+    });
+  }, [rows, hoje]);
 
-  const groupedByDate = useMemo(() => {
-    const map: Record<string, typeof normalized> = {};
-    for (const v of normalized) {
-      const key = v.data_ida;
-      if (!map[key]) map[key] = [];
-      map[key].push(v);
+  const proximos7Dias = useMemo(() => {
+    const limite = ymd(addDays(new Date(), 7));
+    return enriched.filter((v) => v.data_ida >= hoje && v.data_ida <= limite);
+  }, [enriched, hoje]);
+
+  const emAndamento = useMemo(() => enriched.filter((v) => v.status === "em_andamento"), [enriched]);
+  const viagensMapa = useMemo(() => {
+    if (mapaStatusFiltro === "todas") return enriched;
+    return enriched.filter((v) => v.status === mapaStatusFiltro);
+  }, [enriched, mapaStatusFiltro]);
+  const porDestino = useMemo(() => groupViagensByDestino(enriched), [enriched]);
+  const timeline = useMemo(() => groupViagensTimelineByDataIda(enriched), [enriched]);
+
+  const equipes = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const row of rows) {
+      if (row.equipe_id) map.set(row.equipe_id, row.equipe_id);
     }
-    return Object.entries(map).sort(([a], [b]) => a.localeCompare(b));
-  }, [normalized]);
+    return [...map.entries()].map(([id, nome]) => ({ id, nome }));
+  }, [rows]);
 
-  const resumo = useMemo(() => {
-    const hoje = todayISO;
-    const viajandoHoje = normalized.filter((v) => v.data_ida === hoje).length;
-    const emViagemAgora = normalized.filter((v) => v.computedStatus === "em_andamento").length;
-    const proximosEmbarques = normalized.filter((v) => v.data_ida > hoje).length;
-    const finalizadas = normalized.filter((v) => v.computedStatus === "finalizada").length;
-    return { viajandoHoje, emViagemAgora, proximosEmbarques, finalizadas };
-  }, [normalized, todayISO]);
-
-  const destinoAgg = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const v of normalized) {
-      const key = `${v.data_ida}::${v.destino}`;
-      map.set(key, (map.get(key) ?? 0) + 1);
+  const gestores = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const row of rows) {
+      if (row.gestor_id && row.gestor_nome) map.set(row.gestor_id, row.gestor_nome);
     }
-    return [...map.entries()]
-      .map(([key, count]) => {
-        const [date, destino] = key.split("::");
-        return { date, destino, count };
-      })
-      .sort((a, b) => a.date.localeCompare(b.date) || b.count - a.count);
-  }, [normalized]);
+    return [...map.entries()].map(([id, nome]) => ({ id, nome }));
+  }, [rows]);
 
-  const handleStatus = async (viagemId: string, status: ViagemStatus) => {
-    setStatusSavingId(viagemId);
-    setError(null);
-    try {
-      await updateViagemStatus({ viagemId, status });
-      await refresh();
-    } catch (e) {
-      setError(formatSupabaseError(e));
-    } finally {
-      setStatusSavingId(null);
-    }
-  };
-
-  const handleMsg = async (viagemId: string, tipo: MsgTipo) => {
-    setSendingId(viagemId);
-    setError(null);
-    try {
-      await markViagemMensagemEnviada({ viagemId, tipo });
-      await refresh();
-    } catch (e) {
-      setError(formatSupabaseError(e));
-    } finally {
-      setSendingId(null);
-    }
-  };
-
-  if (!selectedEquipeId) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Viagens</CardTitle>
-          <CardDescription>Selecione uma equipe no cabeçalho para monitorar viagens.</CardDescription>
-        </CardHeader>
-      </Card>
-    );
-  }
+  const clientesEmViagemHoje = useMemo(() => new Set(enriched.filter((v) => v.status === "em_andamento").map((v) => v.cliente_id)).size, [enriched]);
+  const totalPassageiros = useMemo(() => enriched.reduce((sum, v) => sum + v.passageiros, 0), [enriched]);
+  const destinoMaisFrequente = porDestino[0]?.destino ?? "N/A";
+  const chegadasHoje = useMemo(() => enriched.filter((v) => v.chegadaHoje).length, [enriched]);
+  const retornosHoje = useMemo(() => enriched.filter((v) => v.retornoHoje).length, [enriched]);
 
   return (
     <div className="space-y-6">
       <Card>
         <CardHeader>
           <CardTitle>Viagens</CardTitle>
-          <CardDescription>Monitoramento de viagens por equipe com timeline, status e ações.</CardDescription>
+          <CardDescription>Radar operacional de viagens com a estrutura Gest Miles.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
-
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-5">
             <div>
-              <label className="mb-1 block text-xs font-medium">Equipe</label>
-              <Input value={selectedEquipeId} disabled />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium">Período</label>
-              <Select value={dateFilter} onValueChange={(v) => setDateFilter(v as DateFilter)}>
+              <label className="mb-1 block text-xs font-medium">Tipo usuário</label>
+              <Select value={tipoUsuario} onValueChange={(v) => setTipoUsuario(v as TipoUsuarioFiltro)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="hoje">hoje</SelectItem>
-                  <SelectItem value="semana">essa semana</SelectItem>
-                  <SelectItem value="mes">esse mês</SelectItem>
+                  <SelectItem value="todos">todos</SelectItem>
+                  <SelectItem value="clientes">clientes</SelectItem>
+                  <SelectItem value="clientes_gestao">clientes_gestao</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium">Destino</label>
-              <Input value={destinoSearch} onChange={(e) => setDestinoSearch(e.target.value)} placeholder="Pesquisar destino..." />
+              <label className="mb-1 block text-xs font-medium">Equipe</label>
+              <Select value={equipeFilter} onValueChange={setEquipeFilter}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">todas</SelectItem>
+                  {equipes.map((e) => (
+                    <SelectItem key={e.id} value={e.id}>{e.nome}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium">Gestor</label>
+              <Select value={gestorFilter} onValueChange={setGestorFilter}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">todos</SelectItem>
+                  {gestores.map((g) => (
+                    <SelectItem key={g.id} value={g.id}>{g.nome}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium">Período início</label>
+              <Input type="date" value={periodoInicio} onChange={(e) => setPeriodoInicio(e.target.value)} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium">Período fim</label>
+              <Input type="date" value={periodoFim} onChange={(e) => setPeriodoFim(e.target.value)} />
             </div>
           </div>
-
-          <div className="grid gap-3 md:grid-cols-4">
-            <SummaryCard title="Clientes embarcando hoje" value={resumo.viajandoHoje} />
-            <SummaryCard title="Clientes em viagem agora" value={resumo.emViagemAgora} />
-            <SummaryCard title="Próximos embarques" value={resumo.proximosEmbarques} />
-            <SummaryCard title="Viagens finalizadas" value={resumo.finalizadas} />
+          <div>
+            <label className="mb-1 block text-xs font-medium">Destino</label>
+            <Input value={destinoFilter} onChange={(e) => setDestinoFilter(e.target.value)} placeholder="IATA, cidade ou nome..." />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <SummaryCard title="Clientes em viagem hoje" value={clientesEmViagemHoje} />
+            <SummaryCard title="Próximas viagens (7 dias)" value={proximos7Dias.length} />
+            <SummaryCard title="Total passageiros" value={totalPassageiros} />
+            <SummaryCard title="Destino mais frequente" value={destinoMaisFrequente} text />
           </div>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Linha do tempo</CardTitle>
-          <CardDescription>Viagens agrupadas por data de ida.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {loading ? <p className="text-sm text-muted-foreground">Carregando viagens...</p> : null}
-          {!loading && groupedByDate.length === 0 ? <p className="text-sm text-muted-foreground">Sem viagens no filtro atual.</p> : null}
-          {groupedByDate.map(([date, items]) => (
-            <div key={date} className="rounded-md border p-3">
-              <div className="mb-2 text-sm font-semibold">{date}</div>
-              <div className="space-y-2">
-                {items.map((v) => {
-                  const b = statusBadge(v.computedStatus);
-                  return (
-                    <div key={v.id} className="rounded-md border bg-card p-3">
-                      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-                        <div className="font-medium">{v.clienteNome}</div>
-                        <span className={`rounded-full border px-2 py-0.5 text-xs ${b.className}`}>{b.label}</span>
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {v.destino} · {v.qtd_passageiros} pessoas · {v.data_ida} → {v.data_volta}
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          disabled={statusSavingId === v.id}
-                          onClick={() => void handleStatus(v.id, "chegada_confirmada")}
-                        >
-                          Confirmar chegada
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          disabled={statusSavingId === v.id}
-                          onClick={() => void handleStatus(v.id, "finalizada")}
-                        >
-                          Confirmar retorno
-                        </Button>
-                        <Select onValueChange={(x) => void handleMsg(v.id, x as MsgTipo)}>
-                          <SelectTrigger className="h-8 w-[170px]"><SelectValue placeholder="Enviar mensagem" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="pre_viagem" disabled={sendingId === v.id}>Pré-viagem</SelectItem>
-                            <SelectItem value="chegada" disabled={sendingId === v.id}>Chegada</SelectItem>
-                            <SelectItem value="pos_viagem" disabled={sendingId === v.id}>Pós-viagem</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                  );
-                })}
+      <div className="grid gap-6 xl:grid-cols-[2fr,1fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle>Radar Map</CardTitle>
+            <CardDescription>Mapa principal com rotas, clusters e destaque de status.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="relative z-50 mb-3 max-w-[280px]">
+              <label className="mb-1 block text-xs font-medium">Exibir no mapa</label>
+              <Select value={mapaStatusFiltro} onValueChange={(v) => setMapaStatusFiltro(v as MapaStatusFiltro)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent className="z-[2000]">
+                  <SelectItem value="todas">todas</SelectItem>
+                  <SelectItem value="planejada">planejadas</SelectItem>
+                  <SelectItem value="em_andamento">em andamento</SelectItem>
+                  <SelectItem value="finalizada">finalizadas</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Suspense fallback={<div className="h-[620px] animate-pulse rounded-md border bg-muted/40" />}>
+              <AdminViagensRadarMap
+                viagens={viagensMapa.map((v) => ({
+                  id: v.id,
+                  cliente_nome: v.cliente_nome,
+                  origem_iata: v.origem_iata,
+                  destino_iata: v.destino_iata,
+                  data_ida: v.data_ida,
+                  data_volta: v.data_volta,
+                  passageiros: v.passageiros,
+                  tipo_usuario: v.tipo_usuario,
+                  equipe_nome: v.equipe_nome,
+                  status: v.status,
+                  viagemHoje: v.viagemHoje,
+                  chegadaHoje: v.chegadaHoje,
+                  retornoHoje: v.retornoHoje,
+                  origem: v.aeroporto_origem?.lat != null && v.aeroporto_origem?.lng != null
+                    ? {
+                        lat: v.aeroporto_origem.lat,
+                        lng: v.aeroporto_origem.lng,
+                        label: `${v.origem_iata} - ${v.aeroporto_origem.nome}`,
+                      }
+                    : null,
+                  destino: v.aeroporto_destino?.lat != null && v.aeroporto_destino?.lng != null
+                    ? {
+                        lat: v.aeroporto_destino.lat,
+                        lng: v.aeroporto_destino.lng,
+                        label: `${v.destino_iata} - ${v.aeroporto_destino.nome}`,
+                      }
+                    : null,
+                }))}
+              />
+            </Suspense>
+          </CardContent>
+        </Card>
+
+        <div className="space-y-6">
+          <SectionCard title="Destaques do dia" description="Pulse operacional para acompanhamento rápido.">
+            <HighlightLine label="Viagens hoje" value={enriched.filter((v) => v.viagemHoje).length} />
+            <HighlightLine label="Chegadas hoje" value={chegadasHoje} />
+            <HighlightLine label="Retornos hoje" value={retornosHoje} />
+          </SectionCard>
+
+          <SectionCard title="1. Em andamento" description="Viagens em curso agora.">
+            {emAndamento.length === 0 ? <p className="text-sm text-muted-foreground">Sem viagens em andamento.</p> : null}
+            {emAndamento.slice(0, 8).map((v) => (
+              <TravelLine key={v.id} v={v} pulse={v.viagemHoje} />
+            ))}
+          </SectionCard>
+
+          <SectionCard title="2. Próximas viagens" description="Saídas previstas (7 dias).">
+            {proximos7Dias.length === 0 ? <p className="text-sm text-muted-foreground">Sem viagens previstas.</p> : null}
+            {proximos7Dias.slice(0, 8).map((v) => (
+              <TravelLine key={v.id} v={v} pulse={v.viagemHoje} />
+            ))}
+          </SectionCard>
+        </div>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <SectionCard title="3. Por destino" description="Cluster de clientes por destino mais frequente.">
+          {porDestino.length === 0 ? <p className="text-sm text-muted-foreground">Sem dados para agrupamento.</p> : null}
+          <div className="grid gap-2">
+            {porDestino.slice(0, 12).map((item) => (
+              <div key={item.destino} className="rounded-md border p-3 text-sm">
+                <div className="font-semibold">{item.destino}</div>
+                <div className="text-muted-foreground">{item.clientes} clientes · {item.passageiros} passageiros</div>
               </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+            ))}
+          </div>
+        </SectionCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Alertas inteligentes</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          <AlertLine label="Hoje" text={`Clientes embarcando hoje: ${resumo.viajandoHoje}`} />
-          <AlertLine label="Durante viagem" text={`Clientes em viagem agora: ${resumo.emViagemAgora}`} />
-          <AlertLine label="Chegada" text="Verifique pendências de confirmação de chegada." />
-          <AlertLine label="Retorno" text="Verifique pendências de confirmação de retorno." />
-        </CardContent>
-      </Card>
+        <SectionCard title="4. Timeline" description="Sequência por data para leitura de operação.">
+          {loading ? <p className="text-sm text-muted-foreground">Carregando...</p> : null}
+          {!loading && timeline.length === 0 ? <p className="text-sm text-muted-foreground">Sem viagens no filtro atual.</p> : null}
+          <div className="space-y-3">
+            {timeline.slice(0, 12).map((group) => (
+              <div key={group.data} className="rounded-md border p-3">
+                <div className="mb-2 text-sm font-semibold">{group.data}</div>
+                <div className="space-y-2">
+                  {group.itens.map((v) => (
+                    <TravelLine key={v.id} v={v} pulse={v.viagemHoje || v.chegadaHoje || v.retornoHoje} />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Agregado por data e destino</CardTitle>
-          <CardDescription>Ex.: 28/03 → 5 clientes indo para Miami.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-1 text-sm">
-          {destinoAgg.length === 0 ? (
-            <p className="text-muted-foreground">Sem agregações para o filtro atual.</p>
-          ) : (
-            destinoAgg.slice(0, 20).map((r) => <p key={`${r.date}-${r.destino}`}>{r.date} → {r.count} clientes para {r.destino}</p>)
-          )}
-        </CardContent>
-      </Card>
+      <SectionCard title="Legenda de status" description="Cores padronizadas no mapa e listas.">
+        <div className="grid gap-2 md:grid-cols-3">
+          <LegendPill label="Planejada" color="bg-zinc-400" />
+          <LegendPill label="Em andamento" color="bg-violet-600" />
+          <LegendPill label="Finalizada" color="bg-emerald-600" />
+        </div>
+      </SectionCard>
     </div>
   );
 }
 
-function SummaryCard({ title, value }: { title: string; value: number }) {
+function SummaryCard({ title, value, text = false }: { title: string; value: number | string; text?: boolean }) {
   return (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-medium">{title}</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="text-2xl font-bold">{value}</div>
+        <div className={text ? "text-base font-semibold" : "text-2xl font-bold"}>{value}</div>
       </CardContent>
     </Card>
   );
 }
 
-function AlertLine({ label, text }: { label: string; text: string }) {
+function SectionCard({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return (
-    <div className="rounded-md border p-2">
-      <strong>{label}: </strong>
-      <span>{text}</span>
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">{children}</CardContent>
+    </Card>
+  );
+}
+
+function TravelLine({
+  v,
+  pulse,
+}: {
+  v: ViagemDashboardItem & {
+    status: "planejada" | "em_andamento" | "finalizada";
+    viagemHoje: boolean;
+    chegadaHoje: boolean;
+    retornoHoje: boolean;
+  };
+  pulse?: boolean;
+}) {
+  return (
+    <div className={`rounded-md border p-3 text-sm ${pulse ? "animate-pulse border-purple-300" : ""}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="font-semibold">{v.cliente_nome}</div>
+        <span className="text-xs text-muted-foreground">{statusLabel(v.status)}</span>
+      </div>
+      <div className="text-muted-foreground">
+        {v.origem_iata} -&gt; {v.destino_iata} · {v.data_ida} a {v.data_volta} · {v.passageiros} passageiros
+      </div>
+      <div className="mt-1 text-xs text-muted-foreground">
+        {v.aeroporto_origem?.cidade ?? "Origem n/d"} - {v.aeroporto_destino?.cidade ?? "Destino n/d"} · gestor: {v.gestor_nome ?? "n/d"}
+      </div>
+    </div>
+  );
+}
+
+function HighlightLine({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="flex items-center justify-between rounded-md border p-2 text-sm">
+      <span>{label}</span>
+      <span className="font-semibold">{value}</span>
+    </div>
+  );
+}
+
+function LegendPill({ label, color }: { label: string; color: string }) {
+  return (
+    <div className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+      <span className={`h-2.5 w-2.5 rounded-full ${color}`} />
+      <span>{label}</span>
     </div>
   );
 }

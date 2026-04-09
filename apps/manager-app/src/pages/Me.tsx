@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 
-import { useAuth, type AppRole } from "@/contexts/AuthContext";
+import { mapPerfilRolePreservingGlobalAdmin } from "@gest-miles/shared";
+
+import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { homePathForRole } from "@/lib/homeRoute";
 
@@ -41,16 +43,7 @@ const Me = () => {
 
       if (existing?.slug) {
         await refreshRole();
-        const raw = existing.role as string | undefined;
-        const mapped: AppRole =
-          raw === "admin" ||
-          raw === "cs" ||
-          raw === "gestor" ||
-          raw === "cliente" ||
-          raw === "cliente_gestao"
-            ? raw
-            : "cliente";
-        setRedirectTo(homePathForRole(mapped));
+        setRedirectTo(homePathForRole(mapPerfilRolePreservingGlobalAdmin(existing.role)));
         return;
       }
 

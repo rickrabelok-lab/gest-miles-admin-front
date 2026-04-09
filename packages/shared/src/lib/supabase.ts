@@ -1,14 +1,23 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-const url = import.meta.env.VITE_SUPABASE_URL ?? "";
-const anon = import.meta.env.VITE_SUPABASE_ANON_KEY ?? "";
+const rawUrl = (import.meta.env.VITE_SUPABASE_URL ?? "").trim();
+const rawKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? "").trim();
 
-export const isSupabaseConfigured = Boolean(url && anon);
+/** Igual ao padrão manager/usuario: false se o build/deploy não definiu as envs. */
+export const isSupabaseConfigured = Boolean(rawUrl && rawKey);
 
-/** Cliente para apps Vite que consomem este pacote (variáveis no `.env` do app). */
-export const supabase = createClient(url || "https://placeholder.supabase.co", anon || "placeholder-anon-key", {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
+const fallbackUrl = "https://placeholder.supabase.co";
+const fallbackKey =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSJ9.placeholder";
+
+/** Cliente para apps Vite; variáveis vêm do `.env` / `.env.local` do app (não do pacote). */
+export const supabase: SupabaseClient = createClient(
+  isSupabaseConfigured ? rawUrl : fallbackUrl,
+  isSupabaseConfigured ? rawKey : fallbackKey,
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+    },
   },
-});
+);

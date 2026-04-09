@@ -1,0 +1,14 @@
+{
+  "name": "@gest-miles/services",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./index.ts",
+    "./aeroportos": "./aeroportos.ts"
+  },
+  "dependencies": {
+    "@gest-miles/shared": "file:../shared"
+  }
+}

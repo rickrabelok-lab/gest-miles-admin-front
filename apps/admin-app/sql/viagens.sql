@@ -2,10 +2,11 @@ create table if not exists public.viagens (
   id uuid primary key default gen_random_uuid(),
   cliente_id uuid not null references public.perfis(usuario_id) on delete cascade,
   equipe_id uuid null references public.equipes(id) on delete set null,
-  destino text not null,
+  origem_iata text not null references public.aeroportos(codigo_iata),
+  destino_iata text not null references public.aeroportos(codigo_iata),
   data_ida date not null,
   data_volta date not null,
-  qtd_passageiros integer not null default 1,
+  passageiros integer not null default 1,
   status text not null default 'planejada' check (status in ('planejada', 'em_andamento', 'chegada_confirmada', 'finalizada')),
   checkin_enviado boolean not null default false,
   chegada_enviada boolean not null default false,
@@ -16,5 +17,6 @@ create table if not exists public.viagens (
 
 create index if not exists idx_viagens_equipe_id on public.viagens(equipe_id);
 create index if not exists idx_viagens_data_ida on public.viagens(data_ida);
-create index if not exists idx_viagens_destino on public.viagens(destino);
+create index if not exists idx_viagens_origem_iata on public.viagens(origem_iata);
+create index if not exists idx_viagens_destino_iata on public.viagens(destino_iata);
 
