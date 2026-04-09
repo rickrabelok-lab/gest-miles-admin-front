@@ -351,7 +351,7 @@ const LoyaltyProgramDetails = () => {
     [programWorkspaces, selectedWorkspaceId],
   );
 
-  // Estado financeiro inicial baseado em mock ou no card
+  // Estado financeiro inicial a partir do card / estado persistido
   const saldoInicial = SALDO_BASE_INICIAL;
   const persistedState = useMemo(
     () => readPersistedProgramState(storageKey),
@@ -1421,7 +1421,9 @@ const LoyaltyProgramDetails = () => {
                   <BarChart3 className="h-4 w-4 text-slate-500" />
                 </div>
                 <div className="h-24 rounded-2xl bg-slate-50 text-[11px] text-slate-500 ring-1 ring-slate-200">
-                  <p className="p-3">Gráfico placeholder – saldo vs. tempo</p>
+                  <p className="p-3 text-sm text-muted-foreground">
+                    Gráfico saldo vs. tempo — em breve (dados agregados do programa).
+                  </p>
                 </div>
               </CardContent>
             </Card>

@@ -62,7 +62,8 @@ const hash = (value: string) => {
   return Math.abs(output);
 };
 
-export const generateMockMonthPrices = ({
+/** Estimativa local quando não há linha em `calendar_prices` nem resposta do BFF (não é tarifa GDS). */
+export const generateEstimatedMonthPrices = ({
   originCode,
   destinationCode,
   mode,
@@ -94,3 +95,6 @@ export const generateMockMonthPrices = ({
 
   return pricesByDay;
 };
+
+/** @deprecated usar `generateEstimatedMonthPrices` */
+export const generateMockMonthPrices = generateEstimatedMonthPrices;

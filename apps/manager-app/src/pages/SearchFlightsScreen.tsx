@@ -30,26 +30,8 @@ import {
   type AirportOption,
 } from "@/lib/airports";
 import AirlineLogo from "@/components/AirlineLogo";
-
-type MockFlight = {
-  id: string;
-  originCode: string;
-  destinationCode: string;
-  origin: string;
-  destination: string;
-  airline: string;
-  points: number;
-  money: number;
-};
-
-const MOCK_FLIGHTS: MockFlight[] = [
-  { id: "f1", originCode: "GRU", destinationCode: "CWB", origin: "São Paulo", destination: "Curitiba", airline: "G3", points: 4000, money: 286.9 },
-  { id: "f2", originCode: "CNF", destinationCode: "SDU", origin: "Belo Horizonte", destination: "Rio de Janeiro", airline: "LA", points: 4863, money: 312.5 },
-  { id: "f3", originCode: "CGH", destinationCode: "POA", origin: "São Paulo", destination: "Porto Alegre", airline: "AD", points: 4878, money: 355.2 },
-  { id: "f4", originCode: "BSB", destinationCode: "REC", origin: "Brasília", destination: "Recife", airline: "LA", points: 8200, money: 499.0 },
-  { id: "f5", originCode: "GIG", destinationCode: "LIS", origin: "Rio de Janeiro", destination: "Lisboa", airline: "TP", points: 38500, money: 2890.0 },
-  { id: "f6", originCode: "GRU", destinationCode: "JFK", origin: "São Paulo", destination: "Nova York", airline: "AA", points: 45200, money: 3210.0 },
-];
+import type { DemoFlight } from "@gest-miles/shared";
+import { fetchDemoFlights } from "@/services/demoFlightsService";
 
 const MONTH_OPTIONS = [
   "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez", "Jan", "Fev",
@@ -140,17 +122,27 @@ const SearchFlightsScreen = () => {
   const canAdvance = !!origin && !!destination;
 
   const destinationCode = destination?.code ?? null;
-  const filteredMockFlights = useMemo(() => {
-    if (!destinationCode) return MOCK_FLIGHTS.slice(0, 6);
-    const target = destinationCode.toUpperCase();
-    const matches = MOCK_FLIGHTS.filter((flight) => flight.destinationCode === target);
-    return matches.length > 0 ? matches : MOCK_FLIGHTS.slice(0, 6);
+  const [demoFlights, setDemoFlights] = useState<DemoFlight[]>([]);
+  const [flightsLoading, setFlightsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setFlightsLoading(true);
+    void fetchDemoFlights(destinationCode).then((list) => {
+      if (!cancelled) {
+        setDemoFlights(list);
+        setFlightsLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [destinationCode]);
 
   const formatMoney = (value: number) =>
     value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
-  const handleOpenCalendarFromMockFlight = (flight: MockFlight) => {
+  const handleOpenCalendarFromDemoFlight = (flight: DemoFlight) => {
     const nextOrigin = findAirportByCode(flight.originCode);
     const nextDestination = findAirportByCode(flight.destinationCode);
     if (nextOrigin) setOrigin(nextOrigin);
@@ -411,11 +403,21 @@ const SearchFlightsScreen = () => {
           <section>
             <p className="mb-2 text-xs font-medium text-stone-500">Sugestões</p>
             <div className="space-y-2">
-              {filteredMockFlights.map((flight) => (
+              {flightsLoading && demoFlights.length === 0 && (
+                <p className="rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-500">
+                  Carregando sugestões…
+                </p>
+              )}
+              {!flightsLoading && demoFlights.length === 0 && (
+                <p className="rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-500">
+                  Nenhuma sugestão disponível. Configure o Supabase (tabela demo_flights) ou o BFF.
+                </p>
+              )}
+              {demoFlights.map((flight) => (
                 <button
                   key={flight.id}
                   type="button"
-                  onClick={() => handleOpenCalendarFromMockFlight(flight)}
+                  onClick={() => handleOpenCalendarFromDemoFlight(flight)}
                   className="flex w-full items-center justify-between rounded-xl border border-stone-200 bg-white px-4 py-3 text-left transition-colors hover:border-stone-300 hover:bg-stone-50/50"
                 >
                   <div className="flex items-center gap-3">

@@ -1,4 +1,4 @@
-import { MockPriceProvider } from "@/lib/pricing/providers/mockPriceProvider";
+import { HeuristicPriceProvider } from "@/lib/pricing/providers/heuristicPriceProvider";
 import type {
   BestPriceByDestination,
   BestPriceSearchOptions,
@@ -204,7 +204,7 @@ export const createPriceAggregationEngine = (provider: PriceProvider) => {
   };
 };
 
-const defaultPricingEngine = createPriceAggregationEngine(new MockPriceProvider());
+const defaultPricingEngine = createPriceAggregationEngine(new HeuristicPriceProvider());
 
 export const getBestPriceByDestination = defaultPricingEngine.getBestPriceByDestination;
 export const getBestPriceByDestinationForAllModes =

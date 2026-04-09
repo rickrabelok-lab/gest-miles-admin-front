@@ -1,17 +1,13 @@
 import { apiFetch, hasApiUrl } from "./api";
+import type { CalendarPricesParams } from "@gest-miles/shared";
 
-export type CalendarPricesParams = {
-  originCode: string;
-  destinationCode: string;
-  mode: "money" | "points";
-  month: string; // YYYY-MM
-};
+export type { CalendarPricesParams };
 
 export async function fetchCalendarPrices(
-  params: CalendarPricesParams
+  params: CalendarPricesParams,
 ): Promise<Record<number, number>> {
   if (!hasApiUrl()) {
-    throw new Error("API_URL não configurado. Use mock local.");
+    return {};
   }
   const qs = new URLSearchParams({
     origin: params.originCode,

@@ -39,7 +39,10 @@ const wait = (ms: number) =>
     setTimeout(resolve, ms);
   });
 
-export class MockPriceProvider implements PriceProvider {
+/**
+ * Estimativa determinística para explorar destinos até existir API de tarifas (não substitui GDS).
+ */
+export class HeuristicPriceProvider implements PriceProvider {
   async getQuote(query: PriceQuery): Promise<PriceQuote | null> {
     const { origin, destination, mode } = query;
 
