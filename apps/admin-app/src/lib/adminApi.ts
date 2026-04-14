@@ -4,11 +4,11 @@ import { isSupabaseConfigured, supabase, supabaseNoPersist } from "./supabase";
 export type Perfil = {
   usuario_id: string;
   nome_completo: string | null;
-  role: "admin" | "cs" | "gestor" | "cliente" | "cliente_gestao" | string;
+  role: "admin" | "admin_equipe" | "cs" | "gestor" | "cliente" | "cliente_gestao" | string;
   equipe_id: string | null;
 };
 
-export type Equipe = { id: string; nome: string; parent_id: string | null };
+export type Equipe = { id: string; nome: string; parent_id: string | null; created_at?: string | null };
 export type GestorFuncao = "nacional" | "internacional";
 export type GestorEquipeSlot = number;
 export type CSEquipeSlot = number;
@@ -816,9 +816,16 @@ export async function runOperationalHealthCheck(): Promise<OperationalHealthResu
 }
 
 export async function listEquipes(): Promise<Equipe[]> {
-  const { data, error } = await supabase.from("equipes").select("id, nome, parent_id").order("nome", { ascending: true });
-  if (error) throw error;
-  return (data ?? []) as Equipe[];
+  const res = await supabase.from("equipes").select("id, nome, parent_id, created_at").order("nome", { ascending: true });
+  if (!res.error) {
+    return (res.data ?? []) as Equipe[];
+  }
+  if (isSchemaMissingColumn(res.error.message ?? "", "created_at")) {
+    const { data, error } = await supabase.from("equipes").select("id, nome, parent_id").order("nome", { ascending: true });
+    if (error) throw error;
+    return ((data ?? []) as Equipe[]).map((e) => ({ ...e, created_at: null }));
+  }
+  throw res.error;
 }
 
 export async function listViagens(filter?: { equipeId?: string | null; destino?: string | null }): Promise<Viagem[]> {
@@ -979,7 +986,10 @@ export async function evaluateAdminSubscriptionBlock(params: {
   role: string | null;
   equipeId: string | null;
 }): Promise<{ blocked: boolean; reason?: string }> {
-  if (params.role !== "admin") return { blocked: false };
+  const r = String(params.role ?? "")
+    .trim()
+    .toLowerCase();
+  if (r !== "admin" && r !== "admin_master") return { blocked: false };
   if (!params.equipeId || String(params.equipeId).trim() === "") return { blocked: false };
 
   const { data, error } = await supabase
@@ -1198,11 +1208,30 @@ export async function updateEquipeNome(equipeId: string, nome: string): Promise<
   if (error) throw error;
 }
 
-export async function listPerfis(filter?: { equipeIds?: string[] }): Promise<Perfil[]> {
+export type ListPerfisFilter = {
+  equipeIds?: string[];
+  /** Filtra por `perfis.role` exata (ex.: só `cliente`). */
+  role?: string;
+  /** Apenas linhas com `equipe_id` nulo (contas B2C fora de equipas de gestão). */
+  equipeIdIsNull?: boolean;
+};
+
+export async function listPerfis(filter?: ListPerfisFilter): Promise<Perfil[]> {
   let q = supabase.from("perfis").select("usuario_id, nome_completo, role, equipe_id").order("nome_completo", { ascending: true });
-  if (filter?.equipeIds?.length) q = q.in("equipe_id", filter.equipeIds);
+  if (filter?.equipeIds?.length) {
+    q = q.in("equipe_id", filter.equipeIds);
+  } else if (filter?.equipeIdIsNull) {
+    q = q.is("equipe_id", null);
+  }
+  if (filter?.role) q = q.eq("role", filter.role);
   const res = await q;
-  if (!res.error) return (res.data ?? []) as Perfil[];
+  if (!res.error) {
+    let rows = (res.data ?? []) as Perfil[];
+    if (filter?.equipeIdIsNull) {
+      rows = rows.filter((p) => (p.equipe_id ?? "").toString().trim() === "");
+    }
+    return rows;
+  }
 
   const msg = res.error.message ?? "";
   if (isSchemaMissingColumn(msg, "equipe_id")) {
@@ -1216,9 +1245,38 @@ export async function listPerfis(filter?: { equipeIds?: string[] }): Promise<Per
       const set = new Set(filter.equipeIds);
       rows = rows.filter((p) => p.equipe_id != null && set.has(p.equipe_id));
     }
+    if (filter?.role) rows = rows.filter((p) => String(p.role) === filter.role);
+    if (filter?.equipeIdIsNull) {
+      // Sem coluna equipe_id não dá para distinguir B2C; não devolver clientes “com equipa”.
+      return [];
+    }
     return rows;
   }
   throw res.error;
+}
+
+/** Contagem de contas B2C (`cliente` sem `equipe_id`), alinhada a `ClientsPage` / `listPerfis`. */
+export async function countB2cClientesSemEquipe(): Promise<number> {
+  const nullRes = await supabase
+    .from("perfis")
+    .select("usuario_id", { count: "exact", head: true })
+    .eq("role", "cliente")
+    .is("equipe_id", null);
+
+  if (nullRes.error) {
+    const msg = nullRes.error.message ?? "";
+    if (isSchemaMissingColumn(msg, "equipe_id")) return 0;
+    throw nullRes.error;
+  }
+
+  const emptyRes = await supabase
+    .from("perfis")
+    .select("usuario_id", { count: "exact", head: true })
+    .eq("role", "cliente")
+    .eq("equipe_id", "");
+
+  const empty = emptyRes.error ? 0 : emptyRes.count ?? 0;
+  return (nullRes.count ?? 0) + empty;
 }
 
 export async function listGestores(): Promise<Perfil[]> {
@@ -1650,11 +1708,20 @@ export type CreateUserInput = {
 };
 
 export async function createUser(input: CreateUserInput): Promise<string> {
+  const roleNorm = String(input.role ?? "")
+    .trim()
+    .toLowerCase();
+  if (roleNorm === "admin_master") {
+    throw new Error("O role admin_master não pode ser criado pelo painel; defina-o apenas na base de dados.");
+  }
   if (input.role === "gestor" && !input.equipe_id) {
     throw new Error("Gestor tem de ter equipe_id (uma Gestão).");
   }
   if (input.role === "cs" && !input.equipe_id) {
     throw new Error("CS tem de ter equipe_id (uma Gestão).");
+  }
+  if (input.role === "admin_equipe" && !input.equipe_id?.trim()) {
+    throw new Error("Admin da equipe (admin_equipe) tem de ter equipe_id (uma Gestão).");
   }
 
   const { data, error } = await supabaseNoPersist.auth.signUp({
@@ -1723,11 +1790,23 @@ export async function updateUser(input: {
   cliente_gestor_ids?: string[] | null;
   cliente_cs_ids?: string[] | null;
 }): Promise<void> {
+  const roleNorm = String(input.role ?? "")
+    .trim()
+    .toLowerCase();
+  const prevNorm = String(input.previousRole ?? "")
+    .trim()
+    .toLowerCase();
+  if (roleNorm === "admin_master" && prevNorm !== "admin_master") {
+    throw new Error("O role admin_master não pode ser atribuído pelo painel; altere apenas na base de dados.");
+  }
   if (input.role === "gestor" && !input.equipe_id) {
     throw new Error("Gestor tem de ter equipe_id (uma Gestão).");
   }
   if (input.role === "cs" && !input.equipe_id) {
     throw new Error("CS tem de ter equipe_id (uma Gestão).");
+  }
+  if (input.role === "admin_equipe" && !input.equipe_id?.trim()) {
+    throw new Error("Admin da equipe (admin_equipe) tem de ter equipe_id (Gestão).");
   }
   if (input.role === "cliente_gestao" && !input.equipe_id) {
     throw new Error("cliente_gestao deve ter equipe_id (Gestão).");

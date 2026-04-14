@@ -1,3 +1,7 @@
+-- Nota: o painel admin (Assinaturas & Receita) usa a tabela **public.subscriptions**.
+--       Para criar/RLS dessa tabela, execute subscriptions-table-rls.sql no mesmo projeto.
+--       Este ficheiro define **public.assinaturas** (modelo CRM cliente/equipe + motivo_churn).
+
 create table if not exists public.assinaturas (
   id uuid primary key default gen_random_uuid(),
   tipo text not null check (tipo in ('cliente', 'equipe')),

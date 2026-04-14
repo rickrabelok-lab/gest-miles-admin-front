@@ -13,6 +13,7 @@ import EquipesPage from "@/pages/EquipesPage";
 import GestoresPage from "@/pages/GestoresPage";
 import LoginPage from "@/pages/LoginPage";
 import UsersPage from "@/pages/UsersPage";
+import UsuarioContaAdminPage from "@/pages/UsuarioContaAdminPage";
 import AdminViagensPage from "@/pages/AdminViagens";
 import AdminViagensGeralPage from "@/pages/AdminViagensGeral";
 import AdminOperacionalPage from "@/pages/AdminOperacional";
@@ -42,14 +43,15 @@ export default function App() {
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="users" element={<UsersPage />} />
+            <Route path="contas/:usuarioId" element={<UsuarioContaAdminPage />} />
             <Route path="equipes" element={<EquipesPage />} />
             <Route path="equipes/:equipeId" element={<EquipeDetailPage />} />
             <Route path="clients" element={<ClientsPage />} />
             <Route path="viagens" element={<AdminViagensPage />} />
             <Route path="viagens-geral" element={<AdminViagensGeralPage />} />
-            <Route path="financeiro" element={<Navigate to="/dashboard#dashboard-financeiro" replace />} />
+            <Route path="financeiro" element={<Navigate to="/dashboard" replace />} />
             <Route path="operacional" element={<AdminOperacionalPage />} />
-            <Route path="negocio" element={<Navigate to="/dashboard#dashboard-assinaturas" replace />} />
+            <Route path="negocio" element={<Navigate to="/assinaturas" replace />} />
             <Route path="gestores" element={<GestoresPage />} />
             <Route path="assinaturas" element={<AssinaturasPage />} />
             <Route path="monetizacao" element={<MonetizacaoPage />} />

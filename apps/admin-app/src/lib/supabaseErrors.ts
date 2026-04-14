@@ -23,3 +23,12 @@ export function isMissingRelationError(err: unknown): boolean {
     (blob.includes("relation") && blob.includes("does not exist"))
   );
 }
+
+/** RLS / GRANT: consulta bloqueada (tabela existe mas política não permite). */
+export function isRlsOrPermissionDenied(err: unknown): boolean {
+  if (err == null || typeof err !== "object") return false;
+  const e = err as { message?: string; code?: string };
+  const m = (e.message ?? "").toLowerCase();
+  if (e.code === "42501" || e.code === "PGRST301") return true;
+  return m.includes("permission denied") || m.includes("row-level security");
+}

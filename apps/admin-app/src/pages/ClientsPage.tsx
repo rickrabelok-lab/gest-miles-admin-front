@@ -4,10 +4,9 @@ import { AdminTableToolbar } from "@/components/admin/AdminTableToolbar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAdminEquipe } from "@/context/AdminEquipeContext";
 import {
   formatSupabaseError,
-  gestoresNoGrupos,
+  gestoresNaEquipe,
   listClienteGestorIdsMap,
   listEquipeGestorLinks,
   listEquipes,
@@ -24,8 +23,12 @@ function sameSelection(perfil: Perfil, role: Perfil["role"], equipeId: string) {
   return perfil.role === role && (perfil.equipe_id ?? "") === equipeId;
 }
 
+/** Contas diretas B2C: só `cliente` e sem equipa de gestão atribuída. */
+function isB2cClienteRow(p: Perfil): boolean {
+  return p.role === "cliente" && (p.equipe_id ?? "").toString().trim() === "";
+}
+
 export default function ClientsPage() {
-  const { selectedEquipeId, equipeIdsFiltro } = useAdminEquipe();
   const [equipes, setEquipes] = useState<Equipe[]>([]);
   const [perfis, setPerfis] = useState<Perfil[]>([]);
   const [allGestores, setAllGestores] = useState<Perfil[]>([]);
@@ -35,17 +38,12 @@ export default function ClientsPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
-  const clientes = useMemo(() => perfis.filter((p) => p.role === "cliente" || p.role === "cliente_gestao"), [perfis]);
+  const clientes = useMemo(() => perfis.filter(isB2cClienteRow), [perfis]);
 
-  const gestoresDisponiveis = useMemo(
-    () => gestoresNoGrupos(equipeIdsFiltro, allGestores, equipeGestorLinks),
-    [equipeIdsFiltro, allGestores, equipeGestorLinks],
+  const equipesOrdenadas = useMemo(
+    () => [...equipes].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")),
+    [equipes],
   );
-
-  const equipesGrupo = useMemo(() => {
-    const set = new Set(equipeIdsFiltro);
-    return equipes.filter((e) => set.has(e.id)).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
-  }, [equipes, equipeIdsFiltro]);
 
   const filteredClientes = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -57,67 +55,51 @@ export default function ClientsPage() {
   }, [clientes, search]);
 
   const refresh = async () => {
-    if (!selectedEquipeId || !equipeIdsFiltro.length) {
-      setPerfis([]);
-      setEquipes([]);
-      setAllGestores([]);
-      setEquipeGestorLinks([]);
-      setCarteiraGestoresByUser({});
-      return;
-    }
     setLoading(true);
     setError(null);
     try {
       const [e, p, gs, eg] = await Promise.all([
         listEquipes(),
-        listPerfis({ equipeIds: equipeIdsFiltro }),
+        listPerfis({ role: "cliente", equipeIdIsNull: true }),
         listGestores(),
         listEquipeGestorLinks(),
       ]);
       setEquipes(e);
-      setPerfis(p);
+      const b2c = p.filter(isB2cClienteRow);
+      setPerfis(b2c);
       setAllGestores(gs);
       setEquipeGestorLinks(eg);
-      const carteiraIds = p.filter((x) => x.role === "cliente_gestao" || x.role === "cliente").map((x) => x.usuario_id);
-      setCarteiraGestoresByUser(await listClienteGestorIdsMap(carteiraIds));
+      const carteiraIds = b2c.map((x) => x.usuario_id);
+      setCarteiraGestoresByUser(carteiraIds.length ? await listClienteGestorIdsMap(carteiraIds) : {});
     } catch (err) {
       setError(formatSupabaseError(err));
     } finally {
       setLoading(false);
+      window.dispatchEvent(new CustomEvent("gm:admin-b2c-clientes-updated"));
     }
   };
 
   useEffect(() => {
     void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedEquipeId, equipeIdsFiltro.join(",")]);
-
-  if (!selectedEquipeId) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Clientes</CardTitle>
-          <CardDescription>Selecione um grupo no cabeçalho.</CardDescription>
-        </CardHeader>
-      </Card>
-    );
-  }
+  }, []);
 
   return (
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Clientes</CardTitle>
+          <CardTitle>Usuários GestMiles</CardTitle>
           <CardDescription>
-            Promover para <code className="text-xs">cliente_gestao</code>, mudar de equipe e atribuir gestores da carteira (filtrados
-            pela equipe selecionada no cabeçalho).
+            Apenas contas <strong>B2C</strong>: role <code className="text-xs">cliente</code>, sem{" "}
+            <code className="text-xs">equipe_id</code> (fora de equipas de gestão). Não inclui{" "}
+            <code className="text-xs">cliente_gestao</code>, CS, gestores nem admins de equipa. Pode associar uma equipa ou
+            promover a <code className="text-xs">cliente_gestao</code> para integrar na gestão.
           </CardDescription>
         </CardHeader>
         <CardContent>
           {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
-          <AdminTableToolbar value={search} onChange={setSearch} placeholder="Pesquisar cliente…" />
+          <AdminTableToolbar value={search} onChange={setSearch} placeholder="Pesquisar conta B2C…" />
           {!loading && filteredClientes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhum dado encontrado.</p>
+            <p className="text-sm text-muted-foreground">Nenhuma conta B2C sem equipa encontrada.</p>
           ) : null}
           <div className="overflow-x-auto rounded-[14px] border border-nubank-border bg-white">
             <table className="w-full min-w-[960px] border-collapse text-sm">
@@ -125,7 +107,7 @@ export default function ClientsPage() {
                 <tr className="border-b border-nubank-border text-left text-xs font-medium uppercase tracking-wide text-nubank-text-secondary">
                   <th className="px-3 py-3">Nome</th>
                   <th className="px-3 py-3">Role</th>
-                  <th className="px-3 py-3">Equipe</th>
+                  <th className="px-3 py-3">Equipa</th>
                   <th className="px-3 py-3">Gestores</th>
                   <th className="px-3 py-3">Ações</th>
                 </tr>
@@ -143,9 +125,9 @@ export default function ClientsPage() {
                       <ClientRow
                         key={c.usuario_id}
                         perfil={c}
-                        equipes={equipesGrupo}
-                        allEquipes={equipes}
-                        gestoresDisponiveis={gestoresDisponiveis}
+                        allEquipes={equipesOrdenadas}
+                        allGestores={allGestores}
+                        equipeGestorLinks={equipeGestorLinks}
                         carteiraGestorIds={carteiraGestoresByUser[c.usuario_id] ?? []}
                         onDone={refresh}
                       />
@@ -161,16 +143,16 @@ export default function ClientsPage() {
 
 function ClientRow({
   perfil,
-  equipes,
   allEquipes,
-  gestoresDisponiveis,
+  allGestores,
+  equipeGestorLinks,
   carteiraGestorIds,
   onDone,
 }: {
   perfil: Perfil;
-  equipes: Equipe[];
   allEquipes: Equipe[];
-  gestoresDisponiveis: Perfil[];
+  allGestores: Perfil[];
+  equipeGestorLinks: Array<{ equipe_id: string; gestor_id: string }>;
   carteiraGestorIds: string[];
   onDone: () => Promise<void>;
 }) {
@@ -180,16 +162,10 @@ function ClientRow({
   const [gSel, setGSel] = useState<string[]>(carteiraGestorIds);
   const [cartBusy, setCartBusy] = useState(false);
 
-  const selectOptions = useMemo(() => {
-    const byId = new Map(equipes.map((e) => [e.id, e]));
-    const out = [...equipes];
-    const pid = perfil.equipe_id;
-    if (pid && !byId.has(pid)) {
-      const extra = allEquipes.find((e) => e.id === pid);
-      if (extra) out.unshift(extra);
-    }
-    return out;
-  }, [equipes, allEquipes, perfil.equipe_id]);
+  const gestoresDisponiveis = useMemo(
+    () => (equipeId.trim() ? gestoresNaEquipe(equipeId.trim(), allGestores, equipeGestorLinks) : []),
+    [equipeId, allGestores, equipeGestorLinks],
+  );
 
   useEffect(() => {
     setEquipeId(perfil.equipe_id ?? "");
@@ -221,7 +197,8 @@ function ClientRow({
           value={equipeId}
           onChange={(e) => setEquipeId(e.target.value)}
         >
-          {selectOptions.map((eq) => (
+          <option value="">Sem equipa (B2C)</option>
+          {allEquipes.map((eq) => (
             <option key={eq.id} value={eq.id}>
               {eq.nome}
             </option>
@@ -285,7 +262,7 @@ function ClientRow({
                   usuario_id: perfil.usuario_id,
                   nome_completo: perfil.nome_completo ?? "Cliente",
                   role,
-                  equipe_id: equipeId,
+                  equipe_id: equipeId.trim() || null,
                   previousRole: perfil.role,
                 });
               }

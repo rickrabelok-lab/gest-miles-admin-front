@@ -1,4 +1,4 @@
-import { isMissingRelationError } from "@/lib/supabaseErrors";
+import { isMissingRelationError, isRlsOrPermissionDenied } from "@/lib/supabaseErrors";
 import { supabase } from "@/lib/supabase";
 
 export type SubscriptionRow = Record<string, unknown> & { id?: string };
@@ -44,6 +44,7 @@ export async function listSubscriptionsAdmin(): Promise<{ rows: SubscriptionView
   const { data, error } = await supabase.from("subscriptions").select("*").limit(2000);
   if (error) {
     if (isMissingRelationError(error)) return { rows: [], available: false };
+    if (isRlsOrPermissionDenied(error)) return { rows: [], available: false };
     throw error;
   }
   const now = new Date();

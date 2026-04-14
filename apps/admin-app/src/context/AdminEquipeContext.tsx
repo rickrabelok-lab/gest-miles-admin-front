@@ -9,14 +9,22 @@ import {
 } from "react";
 
 import { useAdminAuth } from "@/context/AdminAuthContext";
+import { isAdminPanelRole } from "@/lib/accessScope";
 import { supabase } from "@/lib/supabase";
 
 export type Equipe = { id: string; nome: string; parent_id: string | null };
+
+export type EquipeNomeEdicaoDraft = { equipeId: string; nome: string };
 
 type Ctx = {
   equipes: Equipe[];
   selectedEquipeId: string | null;
   setSelectedEquipeId: (id: string | null) => void;
+  /** Rascunho do nome na página `/equipes/:id` (topbar, selectores, etc.). */
+  equipeNomeEdicaoDraft: EquipeNomeEdicaoDraft | null;
+  setEquipeNomeEdicaoDraft: (draft: EquipeNomeEdicaoDraft | null) => void;
+  /** Actualiza o nome na lista em memória após gravar no Supabase. */
+  patchEquipeNomeInList: (equipeId: string, nome: string) => void;
   /** Todas as equipes (dropdown do filtro). */
   equipesGrupoGestaoRaiz: Equipe[];
   /**
@@ -39,13 +47,19 @@ const STORAGE_KEY = "admin-selected-equipe-id";
 export function AdminEquipeProvider({ children }: PropsWithChildren) {
   const { role, equipeId: authEquipeId, roleLoading: authRoleLoading } = useAdminAuth();
   const equipeSelectionLocked = Boolean(
-    !authRoleLoading && role === "admin" && authEquipeId != null && String(authEquipeId).trim() !== "",
+    !authRoleLoading && isAdminPanelRole(role) && authEquipeId != null && String(authEquipeId).trim() !== "",
   );
 
   const [equipes, setEquipes] = useState<Equipe[]>([]);
   const [selectedEquipeId, setSelectedEquipeIdState] = useState<string | null>(null);
+  const [equipeNomeEdicaoDraft, setEquipeNomeEdicaoDraft] = useState<EquipeNomeEdicaoDraft | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const patchEquipeNomeInList = useCallback((equipeId: string, nome: string) => {
+    const trimmed = nome.trim();
+    setEquipes((prev) => prev.map((e) => (e.id === equipeId ? { ...e, nome: trimmed } : e)));
+  }, []);
 
   const setSelectedEquipeId = useCallback(
     (id: string | null) => {
@@ -117,6 +131,9 @@ export function AdminEquipeProvider({ children }: PropsWithChildren) {
       equipes,
       selectedEquipeId,
       setSelectedEquipeId,
+      equipeNomeEdicaoDraft,
+      setEquipeNomeEdicaoDraft,
+      patchEquipeNomeInList,
       equipesGrupoGestaoRaiz,
       equipeIdsFiltro,
       defaultEquipeIdForCreateUser,
@@ -128,6 +145,8 @@ export function AdminEquipeProvider({ children }: PropsWithChildren) {
       equipes,
       selectedEquipeId,
       setSelectedEquipeId,
+      equipeNomeEdicaoDraft,
+      patchEquipeNomeInList,
       equipesGrupoGestaoRaiz,
       equipeIdsFiltro,
       defaultEquipeIdForCreateUser,

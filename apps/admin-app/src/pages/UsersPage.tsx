@@ -23,12 +23,30 @@ import {
   type Perfil,
 } from "@/lib/adminApi";
 
-const roleOptionsEdit: Perfil["role"][] = ["cliente", "cliente_gestao", "gestor", "cs", "admin"];
-/** Ordem UX: cliente → cliente_gestao → gestor → cs → admin */
-const roleOptionsCreate: Perfil["role"][] = ["cliente", "cliente_gestao", "gestor", "cs", "admin"];
+/** Criação: nunca admin global nem admin_master (estes só na BD / Supabase). */
+const roleOptionsCreate: Perfil["role"][] = ["cliente", "cliente_gestao", "gestor", "cs", "admin_equipe"];
+
+const ROLE_OPTION_LABEL: Record<string, string> = {
+  cliente: "Cliente",
+  cliente_gestao: "Cliente gestão",
+  gestor: "Gestor",
+  cs: "CS",
+  admin_equipe: "Admin da equipe (admin_equipe)",
+  admin: "Admin global do painel (admin)",
+};
+
+function roleOptionsForEdit(scopeKind: "global_admin" | "equipe_admin" | undefined | null, currentRole: string): Perfil["role"][] {
+  const base: Perfil["role"][] = ["cliente", "cliente_gestao", "gestor", "cs", "admin_equipe"];
+  const list = scopeKind === "global_admin" ? [...base, "admin" as Perfil["role"]] : base;
+  const cur = String(currentRole).trim();
+  if (cur && cur !== "admin_master" && !list.includes(cur as Perfil["role"])) {
+    return [...list, cur as Perfil["role"]];
+  }
+  return list;
+}
 
 function roleRequiresEquipe(role: Perfil["role"]): boolean {
-  return role === "gestor" || role === "cs" || role === "cliente_gestao";
+  return role === "gestor" || role === "cs" || role === "cliente_gestao" || role === "admin_equipe";
 }
 
 function equipesFlatOptions(equipes: Equipe[]) {
@@ -67,6 +85,7 @@ export default function UsersPage() {
   const [search, setSearch] = useState("");
   const [searchParams] = useSearchParams();
   const equipeFilterId = searchParams.get("equipe") ?? "";
+  const usuarioHighlightId = searchParams.get("usuario") ?? "";
 
   const equipesById = useMemo(() => new Map(equipesFlat.map((e) => [e.id, e.nome])), [equipesFlat]);
 
@@ -116,7 +135,10 @@ export default function UsersPage() {
     let gs: Perfil[] = [];
     let cs: Perfil[] = [];
     let pf: Perfil[] = [];
-    const team = equipeIdsFiltro.length > 0 ? { equipeIds: equipeIdsFiltro } : undefined;
+    const equipeFromUrl = equipeFilterId.trim();
+    const teamIdsForFetch =
+      equipeFromUrl.length > 0 ? [equipeFromUrl] : equipeIdsFiltro.length > 0 ? [...equipeIdsFiltro] : [];
+    const team = teamIdsForFetch.length > 0 ? { equipeIds: teamIdsForFetch } : undefined;
     try {
       flat = await listEquipes();
     } catch (e) {
@@ -150,8 +172,8 @@ export default function UsersPage() {
 
     // Garante que membros vinculados por equipe_gestores / equipe_cs também aparecem
     // quando o filtro está por equipe (mesmo em cenários legados de perfis.equipe_id).
-    if (equipeIdsFiltro.length > 0) {
-      const eqSet = new Set(equipeIdsFiltro);
+    if (teamIdsForFetch.length > 0) {
+      const eqSet = new Set(teamIdsForFetch);
       const linkedGestorIds = new Set(eg.filter((l) => eqSet.has(l.equipe_id)).map((l) => l.gestor_id));
       const linkedCsIds = new Set(ec.filter((l) => eqSet.has(l.equipe_id)).map((l) => l.cs_id));
       const byUserId = new Map(pf.map((p) => [p.usuario_id, p]));
@@ -191,7 +213,23 @@ export default function UsersPage() {
       m = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [equipeIdsFiltro.join(",")]);
+  }, [equipeIdsFiltro.join(","), equipeFilterId]);
+
+  const highlightTargetPresent =
+    Boolean(usuarioHighlightId.trim()) && filtered.some((p) => p.usuario_id === usuarioHighlightId.trim());
+
+  useEffect(() => {
+    if (loading || !highlightTargetPresent) return;
+    const uid = usuarioHighlightId.trim();
+    const t = window.setTimeout(() => {
+      const el = document.getElementById(`admin-user-row-${uid}`);
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.setAttribute("data-user-highlight", "1");
+      window.setTimeout(() => el.removeAttribute("data-user-highlight"), 2600);
+    }, 120);
+    return () => window.clearTimeout(t);
+  }, [loading, usuarioHighlightId, highlightTargetPresent]);
 
   if (loading) return <div style={{ fontSize: 14, color: "#64748b" }}>Carregando…</div>;
 
@@ -202,7 +240,8 @@ export default function UsersPage() {
         <p style={{ marginTop: 4, fontSize: 13, color: "#64748b" }}>
           Criar com senha provisória; no app o utilizador será obrigado a definir nova senha. Escolha primeiro o role e depois a equipe;
           para <code style={{ fontSize: 12 }}>cliente_gestao</code>, os gestores e CS listados vêm apenas da equipe escolhida no
-          formulário.
+          formulário. <strong>Admin da equipe</strong> grava <code style={{ fontSize: 12 }}>admin_equipe</code> (gestão no Manager); o
+          role <code style={{ fontSize: 12 }}>admin_master</code> não pode ser criado nem atribuído aqui — só diretamente na base.
         </p>
         {equipeFilterId ? (
           <p style={{ marginTop: 8, fontSize: 13 }}>
@@ -237,7 +276,7 @@ export default function UsersPage() {
             >
               {roleOptionsCreate.map((r) => (
                 <option key={r} value={r}>
-                  {r}
+                  {ROLE_OPTION_LABEL[r] ?? r}
                 </option>
               ))}
             </select>
@@ -248,7 +287,7 @@ export default function UsersPage() {
               {roleRequiresEquipe(createForm.role) ? (
                 <span style={{ color: "#b91c1c" }}> *</span>
               ) : (
-                <span style={{ color: "#64748b", fontWeight: 400 }}> (opcional para cliente / admin)</span>
+                <span style={{ color: "#64748b", fontWeight: 400 }}> (opcional para cliente)</span>
               )}
             </label>
             <select
@@ -438,31 +477,46 @@ export default function UsersPage() {
                 const nome = (edited.nome_completo as string) ?? (p.nome_completo ?? "");
                 const equipeId = (edited.equipe_id as string | null | undefined) ?? p.equipe_id ?? null;
                 const isSaving = savingUserId === p.usuario_id;
+                const isAdminMasterRow = String(p.role).trim().toLowerCase() === "admin_master";
+                const editRoleChoices = roleOptionsForEdit(scope?.kind, p.role);
                 const gestoresGrupo = equipeId ? gestoresNaEquipe(equipeId, allGestores, equipeGestorLinks) : [];
                 const csGrupo = equipeId ? csNaEquipe(equipeId, equipeCsLinks, csPerfis) : [];
                 const cg = carteiraGestoresByUser[p.usuario_id] ?? [];
                 const cc = carteiraCsByUser[p.usuario_id] ?? [];
 
                 return (
-                  <tr key={p.usuario_id} style={{ borderTop: "1px solid #f1f5f9", verticalAlign: "top" }}>
+                  <tr
+                    id={`admin-user-row-${p.usuario_id}`}
+                    key={p.usuario_id}
+                    style={{ borderTop: "1px solid #f1f5f9", verticalAlign: "top" }}
+                  >
                     <td style={{ padding: 10 }}>
                       <div style={{ fontWeight: 600 }}>{nome || "—"}</div>
                       <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "monospace" }}>{p.usuario_id}</div>
                     </td>
                     <td style={{ padding: 10 }}>
-                      <select
-                        style={inp}
-                        value={role}
-                        onChange={(e) =>
-                          setEditByUser((s) => ({ ...s, [p.usuario_id]: { ...edited, role: e.target.value } }))
-                        }
-                      >
-                        {roleOptionsEdit.map((r) => (
-                          <option key={r} value={r}>
-                            {r}
-                          </option>
-                        ))}
-                      </select>
+                      {isAdminMasterRow ? (
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 13 }}>admin_master</div>
+                          <div style={{ fontSize: 11, color: "#64748b", maxWidth: 200, marginTop: 4 }}>
+                            Não pode ser criado nem promovido pelo painel; ajuste só na base (Supabase/SQL).
+                          </div>
+                        </div>
+                      ) : (
+                        <select
+                          style={inp}
+                          value={role}
+                          onChange={(e) =>
+                            setEditByUser((s) => ({ ...s, [p.usuario_id]: { ...edited, role: e.target.value } }))
+                          }
+                        >
+                          {editRoleChoices.map((r) => (
+                            <option key={r} value={r}>
+                              {ROLE_OPTION_LABEL[r] ?? r}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </td>
                     <td style={{ padding: 10, fontSize: 12, color: "#64748b", maxWidth: 220 }}>
                       {role === "cliente_gestao" ? (

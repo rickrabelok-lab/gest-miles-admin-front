@@ -2,9 +2,10 @@ import type { ReactNode } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
 
 import { useAdminAuth } from "@/context/AdminAuthContext";
+import { isAdminPanelRole } from "@/lib/accessScope";
 
 /**
- * Painel administrativo: apenas utilizadores com `perfis.role === 'admin'`.
+ * Painel administrativo: `perfis.role` em { admin, admin_master }.
  * Outros roles autenticados vêem "Acesso não autorizado" (sem entrar nas rotas).
  */
 export default function RequireAdmin({ children }: { children: ReactNode }) {
@@ -12,7 +13,7 @@ export default function RequireAdmin({ children }: { children: ReactNode }) {
     useAdminAuth();
   const location = useLocation();
 
-  if (loading || (user && roleLoading) || (user && role === "admin" && subscriptionGateLoading)) {
+  if (loading || (user && roleLoading) || (user && isAdminPanelRole(role) && subscriptionGateLoading)) {
     return (
       <div style={{ padding: 24, fontSize: 14, color: "#64748b" }}>
         A validar sessão…
@@ -24,7 +25,7 @@ export default function RequireAdmin({ children }: { children: ReactNode }) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 
-  if (role === "admin" && subscriptionBlocked) {
+  if (isAdminPanelRole(role) && subscriptionBlocked) {
     return (
       <div
         style={{
@@ -62,7 +63,7 @@ export default function RequireAdmin({ children }: { children: ReactNode }) {
     );
   }
 
-  if (role !== "admin") {
+  if (!isAdminPanelRole(role)) {
     return (
       <div
         style={{
@@ -88,7 +89,8 @@ export default function RequireAdmin({ children }: { children: ReactNode }) {
           <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, color: "#1f1f1f" }}>Acesso não autorizado</h1>
           <p style={{ marginTop: 12, fontSize: 14, lineHeight: 1.5, color: "#6b6b6b" }}>
             O painel de administração é exclusivo para utilizadores com{" "}
-            <strong style={{ color: "#1f1f1f" }}>role = admin</strong> na tabela <code style={{ fontSize: 13 }}>perfis</code>.
+            <strong style={{ color: "#1f1f1f" }}>role admin ou admin_master</strong> na tabela{" "}
+            <code style={{ fontSize: 13 }}>perfis</code>.
           </p>
           <p style={{ marginTop: 8, fontSize: 13, color: "#6b6b6b" }}>
             O seu perfil atual:{" "}

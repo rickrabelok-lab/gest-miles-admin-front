@@ -15,6 +15,7 @@ import {
   formatSupabaseError,
 } from "@/lib/adminApi";
 import { isSupabaseConfigured } from "@/lib/supabase";
+import { isAdminPanelRole } from "@/lib/accessScope";
 
 function loginFailureMessage(err: unknown): string {
   const m = formatSupabaseError(err).trim();
@@ -33,18 +34,19 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  if (!loading && user && !roleLoading && role === "admin") {
+  if (!loading && user && !roleLoading && isAdminPanelRole(role)) {
     return <Navigate to={from} replace />;
   }
 
-  if (!loading && user && !roleLoading && role !== "admin") {
+  if (!loading && user && !roleLoading && !isAdminPanelRole(role)) {
     return (
       <div className="min-h-screen bg-[var(--fintech-bg)] p-6 flex items-center justify-center">
         <Card className="w-full max-w-[460px]">
           <CardHeader>
             <CardTitle>Acesso não autorizado</CardTitle>
             <CardDescription>
-              Este painel é exclusivo para utilizadores com <strong>role admin</strong>. O seu perfil atual:{" "}
+              Este painel é exclusivo para utilizadores com <strong>role admin ou admin_master</strong>. O seu perfil
+              atual:{" "}
               <strong>{role ?? "—"}</strong>.
             </CardDescription>
           </CardHeader>
@@ -68,7 +70,7 @@ export default function LoginPage() {
       <Card className="w-full max-w-[420px]">
         <CardHeader>
           <CardTitle>Admin — {appNome}</CardTitle>
-          <CardDescription>Entre com a conta que tem role admin.</CardDescription>
+          <CardDescription>Entre com uma conta admin ou admin_master (tabela perfis).</CardDescription>
         </CardHeader>
         <CardContent>
         {!isSupabaseConfigured ? (

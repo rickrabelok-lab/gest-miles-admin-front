@@ -29,10 +29,30 @@ export type ClienteAtivoRow = {
   acoes: number;
 };
 
+export type FunnelStageRow = {
+  id: string;
+  label: string;
+  count: number;
+};
+
+export type GestorRankRow = {
+  usuarioId: string;
+  nome: string;
+  acoes: number;
+  score: number;
+};
+
+export type InsightAlertRow = {
+  tone: "warn" | "info" | "err";
+  title: string;
+  subtitle: string;
+};
+
 export type StrategicInsightsResult = {
   generatedAt: string;
   logSampleSize: number;
   perfisSampleSize: number;
+  windowDays: number;
   usage: {
     byDay: DayUsageRow[];
     byFeature: FeatureUsageRow[];
@@ -40,8 +60,19 @@ export type StrategicInsightsResult = {
   metrics: {
     dau: number;
     mau: number;
+    wau: number;
+    perfisTotal: number;
+    mauShareOfPerfisPct: number | null;
     retention7dPct: number | null;
+    retention30dPct: number | null;
+    novosClientes30d: number;
+    leadsHeuristic30d: number;
+    taxaConversaoLeadsNovosClientesPct: number | null;
+    churnRiskClientes14d: number;
   };
+  funnelStages: FunnelStageRow[];
+  gestoresRanking: GestorRankRow[];
+  alerts: InsightAlertRow[];
   equipesTopGrowth: EquipeGrowthRow[];
   clientesTopActivity: ClienteAtivoRow[];
   insightLines: string[];
@@ -143,18 +174,71 @@ function usersActiveInRange(logs: LogAcaoRow[], start: Date, end: Date): Set<str
   return set;
 }
 
+function textHaystack(log: LogAcaoRow): string {
+  const parts = [
+    log.tipo_acao,
+    log.entidade_afetada,
+    typeof log.details === "object" && log.details != null ? JSON.stringify(log.details) : "",
+  ];
+  return parts.join(" ").toLowerCase();
+}
+
+function isLeadLikeLog(log: LogAcaoRow, dt: Date, since: Date): boolean {
+  if (dt < since) return false;
+  const h = textHaystack(log);
+  return (
+    h.includes("lead") ||
+    h.includes("captacao") ||
+    h.includes("captação") ||
+    h.includes("pipeline") ||
+    h.includes("formulario") ||
+    h.includes("formulário") ||
+    h.includes("inscri")
+  );
+}
+
+function isContactLikeLog(log: LogAcaoRow, dt: Date, since: Date): boolean {
+  if (dt < since) return false;
+  const h = textHaystack(log);
+  return (
+    h.includes("contato") ||
+    h.includes("contacto") ||
+    h.includes("follow") ||
+    h.includes("email env") ||
+    h.includes("mensagem") ||
+    h.includes("whatsapp") ||
+    h.includes("ligacao") ||
+    h.includes("ligação")
+  );
+}
+
+function isReuniaoLikeLog(log: LogAcaoRow, dt: Date, since: Date): boolean {
+  if (dt < since) return false;
+  const h = textHaystack(log);
+  return h.includes("reuniao") || h.includes("reunião") || h.includes("meeting") || h.includes("call") || h.includes("video");
+}
+
+function isPropostaLikeLog(log: LogAcaoRow, dt: Date, since: Date): boolean {
+  if (dt < since) return false;
+  const h = textHaystack(log);
+  return h.includes("proposta") || h.includes("orçamento") || h.includes("orcamento") || h.includes("quote") || h.includes("contrato");
+}
+
 export function computeStrategicInsights(params: {
   logs: LogAcaoRow[];
   perfis: PerfilInsightRow[];
   equipes: EquipeNome[];
   now?: Date;
+  /** Janela do gráfico temporal (7–366). KPIs MAU/DAU mantêm definições fixas onde indicado. */
+  windowDays?: number;
 }): StrategicInsightsResult {
   const now = params.now ?? new Date();
   const logs = params.logs;
   const perfis = params.perfis;
   const equipeNome = new Map(params.equipes.map((e) => [e.id, e.nome]));
+  const windowDays = Math.min(366, Math.max(7, Math.floor(params.windowDays ?? 30)));
 
-  const dayKeys = lastNDaysKeys(30, now);
+  const dayKeys = lastNDaysKeys(windowDays, now);
   const byDayMap = new Map<string, { logins: number; acoes: number; users: Set<string> }>();
   for (const k of dayKeys) {
     byDayMap.set(k, { logins: 0, acoes: 0, users: new Set() });
@@ -164,6 +248,9 @@ export function computeStrategicInsights(params: {
 
   const todayStart = startOfLocalDay(now);
   const mauStart = addDays(todayStart, -29);
+  const wauStart = addDays(todayStart, -6);
+  const leadsWindowStart = addDays(todayStart, -29);
+  const churnCutoff = addDays(now, -14);
 
   const dauUsers = new Set<string>();
   const mauUsers = new Set<string>();
@@ -172,6 +259,11 @@ export function computeStrategicInsights(params: {
   let pmAcoes = 0;
   let pmLogins = 0;
   const pmUsers = new Set<string>();
+
+  let leadsHeuristic30d = 0;
+  let contactLogs30d = 0;
+  let reuniaoLogs30d = 0;
+  let propostaLogs30d = 0;
 
   for (const log of logs) {
     const dt = parseTs(log.created_at);
@@ -196,6 +288,11 @@ export function computeStrategicInsights(params: {
 
     if (dt >= todayStart && log.user_id) dauUsers.add(log.user_id);
     if (dt >= mauStart && log.user_id) mauUsers.add(log.user_id);
+
+    if (isLeadLikeLog(log, dt, leadsWindowStart)) leadsHeuristic30d += 1;
+    if (isContactLikeLog(log, dt, leadsWindowStart)) contactLogs30d += 1;
+    if (isReuniaoLikeLog(log, dt, leadsWindowStart)) reuniaoLogs30d += 1;
+    if (isPropostaLikeLog(log, dt, leadsWindowStart)) propostaLogs30d += 1;
 
     if (dt >= prevMonth.start && dt <= prevMonth.end) {
       pmAcoes += 1;
@@ -226,6 +323,19 @@ export function computeStrategicInsights(params: {
     if (returned.has(u)) intersection += 1;
   }
   const retention7dPct = cohort.size > 0 ? (intersection / cohort.size) * 100 : null;
+
+  const cohort30Start = addDays(todayStart, -30);
+  const cohort30End = addDays(todayStart, -8);
+  cohort30End.setHours(23, 59, 59, 999);
+  const cohort30 = usersActiveInRange(logs, cohort30Start, cohort30End);
+  const returnedLast7 = usersActiveInRange(logs, wauStart, now);
+  let inter30 = 0;
+  for (const u of cohort30) {
+    if (returnedLast7.has(u)) inter30 += 1;
+  }
+  const retention30dPct = cohort30.size > 0 ? (inter30 / cohort30.size) * 100 : null;
+
+  const wauUsers = usersActiveInRange(logs, wauStart, now);
 
   const t30 = startOfLocalDay(addDays(now, -29));
   const t60 = startOfLocalDay(addDays(now, -59));
@@ -278,6 +388,97 @@ export function computeStrategicInsights(params: {
     .sort((a, b) => b.acoes - a.acoes)
     .slice(0, 10);
 
+  const lastActionByUser = new Map<string, Date>();
+  for (const log of logs) {
+    const uid = log.user_id;
+    if (!uid) continue;
+    const dt = parseTs(log.created_at);
+    if (!dt) continue;
+    const prev = lastActionByUser.get(uid);
+    if (!prev || dt > prev) lastActionByUser.set(uid, dt);
+  }
+
+  let novosClientes30d = 0;
+  let churnRiskClientes14d = 0;
+  for (const p of perfis) {
+    if (p.role !== "cliente" && p.role !== "cliente_gestao") continue;
+    const c = parseTs(p.created_at);
+    if (c && c >= leadsWindowStart && c <= now) novosClientes30d += 1;
+    const pc = parseTs(p.created_at);
+    if (pc && pc > churnCutoff) continue;
+    const la = lastActionByUser.get(p.usuario_id);
+    if (!la || la < churnCutoff) churnRiskClientes14d += 1;
+  }
+
+  const taxaConversaoLeadsNovosClientesPct =
+    leadsHeuristic30d > 0 ? (novosClientes30d / leadsHeuristic30d) * 100 : null;
+
+  const gestorIds = new Set(perfis.filter((p) => p.role === "gestor").map((p) => p.usuario_id));
+  const gestorCounts = new Map<string, number>();
+  for (const log of logs) {
+    const uid = log.user_id;
+    if (!uid || !gestorIds.has(uid)) continue;
+    const dt = parseTs(log.created_at);
+    if (!dt || dt < leadsWindowStart) continue;
+    gestorCounts.set(uid, (gestorCounts.get(uid) ?? 0) + 1);
+  }
+  let maxGestor = 0;
+  for (const v of gestorCounts.values()) if (v > maxGestor) maxGestor = v;
+  const gestoresRanking: GestorRankRow[] = [...gestorIds]
+    .map((usuarioId) => {
+      const acoes = gestorCounts.get(usuarioId) ?? 0;
+      return {
+        usuarioId,
+        nome: nomeByUser.get(usuarioId) ?? usuarioId,
+        acoes,
+        score: maxGestor > 0 ? Math.round((acoes / maxGestor) * 100) : acoes > 0 ? 50 : 0,
+      };
+    })
+    .filter((g) => g.acoes > 0)
+    .sort((a, b) => b.acoes - a.acoes)
+    .slice(0, 8);
+
+  const funnelStages: FunnelStageRow[] = [
+    { id: "leads", label: "Leads / captação (30d)", count: leadsHeuristic30d },
+    { id: "contato", label: "Sinais de contacto (30d)", count: contactLogs30d },
+    { id: "reuniao", label: "Reuniões / calls (30d)", count: reuniaoLogs30d },
+    { id: "proposta", label: "Propostas / contratos (30d)", count: propostaLogs30d },
+    { id: "novos_cli", label: "Novos perfis cliente (30d)", count: novosClientes30d },
+  ];
+
+  const perfisTotal = perfis.length;
+  const mauShareOfPerfisPct = perfisTotal > 0 ? (mauUsers.size / perfisTotal) * 100 : null;
+
+  const alerts: InsightAlertRow[] = [];
+  if (churnRiskClientes14d > 0) {
+    alerts.push({
+      tone: "warn",
+      title: "Risco de churn (proxy)",
+      subtitle: `${churnRiskClientes14d} perfil(is) cliente sem eventos em logs há mais de 14 dias.`,
+    });
+  }
+  if (retention7dPct != null && retention7dPct < 25 && cohort.size > 2) {
+    alerts.push({
+      tone: "info",
+      title: "Retenção 7d baixa",
+      subtitle: `Apenas ${retention7dPct.toFixed(0)}% da coorte 8–15d voltou nos últimos 7d — valide qualidade dos eventos em logs_acoes.`,
+    });
+  }
+  if (leadsHeuristic30d === 0 && contactLogs30d === 0) {
+    alerts.push({
+      tone: "info",
+      title: "Funil por auditoria vazio",
+      subtitle: "Não foram encontrados tipos/entidades típicos de lead ou contacto — ajuste tipo_acao ou integre CRM.",
+    });
+  }
+  if (logs.length >= 7800) {
+    alerts.push({
+      tone: "info",
+      title: "Limite da amostra",
+      subtitle: "A análise usa as linhas mais recentes carregadas; períodos longos podem ficar truncados.",
+    });
+  }
+
   const insightLines: string[] = [];
   insightLines.push(
     `Amostra de ${logs.length} eventos em logs_acoes (últimos registos carregados). DAU = utilizadores distintos com pelo menos uma ação hoje; MAU = nos últimos 30 dias.`,
@@ -308,6 +509,11 @@ export function computeStrategicInsights(params: {
   } else {
     insightLines.push("Retenção 7d: dados insuficientes (cohorte anterior vazia).");
   }
+  if (retention30dPct != null) {
+    insightLines.push(
+      `Retenção 30d (proxy): ${retention30dPct.toFixed(1)}% dos utilizadores ativos há 8–30 dias voltaram nos últimos 7 dias.`,
+    );
+  }
   insightLines.push(
     `Mês anterior (${prevMonth.labelPt}): ${pmAcoes} ações, ${pmUsers.size} utilizadores únicos, ${pmLogins} eventos classificados como login.`,
   );
@@ -316,12 +522,24 @@ export function computeStrategicInsights(params: {
     generatedAt: now.toISOString(),
     logSampleSize: logs.length,
     perfisSampleSize: perfis.length,
+    windowDays,
     usage: { byDay, byFeature },
     metrics: {
       dau: dauUsers.size,
       mau: mauUsers.size,
+      wau: wauUsers.size,
+      perfisTotal,
+      mauShareOfPerfisPct,
       retention7dPct,
+      retention30dPct,
+      novosClientes30d,
+      leadsHeuristic30d,
+      taxaConversaoLeadsNovosClientesPct,
+      churnRiskClientes14d,
     },
+    funnelStages,
+    gestoresRanking,
+    alerts,
     equipesTopGrowth,
     clientesTopActivity,
     insightLines,
@@ -360,9 +578,15 @@ export function buildInsightsSummaryCsv(result: StrategicInsightsResult): string
     `gerado_em,${csvEscape(result.generatedAt)}`,
     `amostra_logs,${result.logSampleSize}`,
     `amostra_perfis,${result.perfisSampleSize}`,
+    `janela_grafico_dias,${result.windowDays}`,
     `dau,${result.metrics.dau}`,
     `mau_30d,${result.metrics.mau}`,
+    `wau_7d,${result.metrics.wau}`,
     `retencao_7d_pct,${result.metrics.retention7dPct ?? ""}`,
+    `retencao_30d_pct,${result.metrics.retention30dPct ?? ""}`,
+    `leads_heuristica_30d,${result.metrics.leadsHeuristic30d}`,
+    `novos_clientes_30d,${result.metrics.novosClientes30d}`,
+    `churn_risco_clientes_14d,${result.metrics.churnRiskClientes14d}`,
     `mes_anterior,${csvEscape(result.previousMonth.labelPt)}`,
     `mes_anterior_acoes,${result.previousMonth.totalAcoes}`,
     `mes_anterior_utilizadores_unicos,${result.previousMonth.usuariosUnicos}`,
@@ -388,7 +612,9 @@ export function buildMonthlyReportCsv(result: StrategicInsightsResult): string {
     `resumo,logins_mes,${pm.logins}`,
     `kpis,dau_hoje,${result.metrics.dau}`,
     `kpis,mau_30d,${result.metrics.mau}`,
+    `kpis,wau_7d,${result.metrics.wau}`,
     `kpis,retencao_7d_pct,${result.metrics.retention7dPct ?? ""}`,
+    `kpis,retencao_30d_pct,${result.metrics.retention30dPct ?? ""}`,
     `equipes_top,novos_30d,${eq || "—"}`,
     `funcionalidades_top,top5,${ft || "—"}`,
     ...result.insightLines.map((line, i) => `insight,${i + 1},${csvEscape(line)}`),
@@ -403,7 +629,7 @@ export function buildFullExportBundleCsv(result: StrategicInsightsResult): strin
   return (
     "=== RESUMO ===\n" +
     a +
-    "\n\n=== USO_POR_DIA_30D ===\n" +
+    `\n\n=== USO_POR_DIA_${result.windowDays}D ===\n` +
     b +
     "\n\n=== USO_POR_FUNCIONALIDADE ===\n" +
     c +
