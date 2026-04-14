@@ -18,6 +18,7 @@ import AdminViagensGeralPage from "@/pages/AdminViagensGeral";
 import AdminOperacionalPage from "@/pages/AdminOperacional";
 import AdminConfigPage from "@/pages/AdminConfig";
 import AdminSegurancaPage from "@/pages/AdminSeguranca";
+import MonetizacaoPage from "@/pages/MonetizacaoPage";
 
 const routerFuture = {
   v7_startTransition: true,
@@ -51,6 +52,7 @@ export default function App() {
             <Route path="negocio" element={<Navigate to="/dashboard#dashboard-assinaturas" replace />} />
             <Route path="gestores" element={<GestoresPage />} />
             <Route path="assinaturas" element={<AssinaturasPage />} />
+            <Route path="monetizacao" element={<MonetizacaoPage />} />
             <Route path="gestor-groups" element={<Navigate to="/gestores" replace />} />
             <Route path="insights" element={<AdminInsightsPage />} />
             <Route path="configuracoes" element={<AdminConfigPage />} />

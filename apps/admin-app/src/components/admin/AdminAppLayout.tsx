@@ -8,6 +8,7 @@ import {
   Shield,
   Settings,
   Activity,
+  CircleDollarSign,
   LogOut,
   Plane,
   ScrollText,
@@ -54,6 +55,7 @@ const NAV = [
   { to: "/operacional", label: "Operacional", icon: Activity, end: false },
   { to: "/gestores", label: "Gestores", icon: Briefcase, end: false },
   { to: "/assinaturas", label: "Assinaturas", icon: CreditCard, end: false },
+  { to: "/monetizacao", label: "Monetização Stripe", icon: CircleDollarSign, end: false },
   { to: "/logs", label: "Logs", icon: ScrollText, end: false },
 ] as const;
 
