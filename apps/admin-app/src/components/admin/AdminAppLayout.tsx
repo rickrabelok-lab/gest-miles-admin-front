@@ -9,6 +9,7 @@ import { useAccessScope } from "@/hooks/useAccessScope";
 import { canAccessAppConfig, canAccessSecurityDashboard } from "@/lib/accessScope";
 import { countB2cClientesSemEquipe } from "@/lib/adminApi";
 import { countBetaFlagsInStorage } from "@/services/adminFeatureFlagsStore";
+import { loadSuporteState } from "@/services/adminSuporteStore";
 import { cn } from "@/lib/utils";
 
 const NONE = "__none__";
@@ -30,9 +31,11 @@ const ROUTE_TITLES: { prefix: string; title: string }[] = [
   { prefix: "/assinaturas", title: "Assinaturas & Receita" },
   { prefix: "/planos", title: "Planos & Preços" },
   { prefix: "/cupons", title: "Cupons & Promoções" },
+  { prefix: "/relatorios", title: "Relatórios" },
   { prefix: "/monetizacao", title: "Monetização Stripe" },
   { prefix: "/feature-flags", title: "Feature Flags" },
   { prefix: "/comunicacoes", title: "Comunicações" },
+  { prefix: "/suporte", title: "Suporte & Tickets" },
   { prefix: "/logs", title: "Logs" },
 ];
 
@@ -131,6 +134,16 @@ function NavIconCoupon({ className }: { className?: string }) {
   );
 }
 
+function NavIconReport({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+      <rect x="2" y="2" width="12" height="12" rx="2" />
+      <polyline points="5,9 7,11 11,6" />
+      <line x1="5" y1="5" x2="9" y2="5" />
+    </svg>
+  );
+}
+
 function NavIconSettings({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
@@ -188,6 +201,16 @@ function NavIconChat({ className }: { className?: string }) {
   );
 }
 
+function NavIconSupport({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+      <path d="M13 2H3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h3l2 2 2-2h3a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1Z" />
+      <line x1="5" y1="6" x2="11" y2="6" />
+      <line x1="5" y1="9" x2="8" y2="9" />
+    </svg>
+  );
+}
+
 type NavEntry = {
   to: string;
   label: string;
@@ -217,6 +240,7 @@ const NAV_GROUPS: { label: string; items: NavEntry[] }[] = [
       { to: "/assinaturas", label: "Assinaturas", Icon: NavIconLock, badge: { text: "8", kind: "warn" } },
       { to: "/planos", label: "Planos & Preços", Icon: NavIconTag },
       { to: "/cupons", label: "Cupons & Promoções", Icon: NavIconCoupon },
+      { to: "/relatorios", label: "Relatórios", Icon: NavIconReport },
       { to: "/monetizacao", label: "Monetização Stripe", Icon: NavIconCard },
     ],
   },
@@ -225,6 +249,7 @@ const NAV_GROUPS: { label: string; items: NavEntry[] }[] = [
     items: [
       { to: "/feature-flags", label: "Feature Flags", Icon: NavIconFlags, badge: { text: "0 beta", kind: "warn" } },
       { to: "/comunicacoes", label: "Comunicações", Icon: NavIconChat },
+      { to: "/suporte", label: "Suporte & Tickets", Icon: NavIconSupport, badge: { text: "0", kind: "warn" } },
     ],
   },
   {
@@ -244,6 +269,9 @@ export default function AdminAppLayout() {
   const { signOut, perfilNome, role, user } = useAdminAuth();
   const [b2cClienteBadge, setB2cClienteBadge] = useState<number | "loading" | "error">("loading");
   const [ffBetaCount, setFfBetaCount] = useState(() => countBetaFlagsInStorage());
+  const [supportOpenCount, setSupportOpenCount] = useState(() =>
+    loadSuporteState().tickets.filter((ticket) => ticket.status === "aberto").length,
+  );
   const {
     equipesGrupoGestaoRaiz,
     selectedEquipeId,
@@ -285,6 +313,12 @@ export default function AdminAppLayout() {
     const fn = () => setFfBetaCount(countBetaFlagsInStorage());
     window.addEventListener("gm-feature-flags-changed", fn);
     return () => window.removeEventListener("gm-feature-flags-changed", fn);
+  }, []);
+
+  useEffect(() => {
+    const refresh = () => setSupportOpenCount(loadSuporteState().tickets.filter((ticket) => ticket.status === "aberto").length);
+    window.addEventListener("gm-admin-suporte-updated", refresh);
+    return () => window.removeEventListener("gm-admin-suporte-updated", refresh);
   }, []);
 
   const equipeDetalheId = useMemo(() => pathname.match(/^\/equipes\/([^/]+)$/)?.[1] ?? null, [pathname]);
@@ -457,6 +491,8 @@ export default function AdminAppLayout() {
                               : String(b2cClienteBadge)
                           : item.to === "/feature-flags"
                             ? `${ffBetaCount} beta`
+                          : item.to === "/suporte"
+                            ? String(supportOpenCount)
                             : item.badge.text}
                       </span>
                     ) : null}
