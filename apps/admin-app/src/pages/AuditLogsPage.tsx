@@ -90,7 +90,10 @@ export default function AuditLogsPage() {
               <CardTitle>Logs de auditoria</CardTitle>
               <CardDescription>
                 {total} registo(s) — visão{" "}
-                {scope?.kind === "global_admin" ? "global (todas as empresas)" : "da sua equipe"}. Página {page + 1} de{" "}
+                {scope?.kind === "global_admin" || scope?.kind === "admin_geral"
+                  ? "global (todas as empresas)"
+                  : "da sua equipe"}
+                . Página {page + 1} de{" "}
                 {totalPages}.
                 {!hasApiUrl() ? (
                   <>

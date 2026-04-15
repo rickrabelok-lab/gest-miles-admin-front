@@ -30,6 +30,7 @@ import AdminApiWebhooksPage from "@/pages/AdminApiWebhooksPage";
 import AdminOnboardingPage from "@/pages/AdminOnboardingPage";
 import AdminBackupsLgpdPage from "@/pages/AdminBackupsLgpdPage";
 import AdminChangelogPage from "@/pages/AdminChangelogPage";
+import AdminPesquisaPassagensPage from "@/pages/AdminPesquisaPassagensPage";
 
 const routerFuture = {
   v7_startTransition: true,
@@ -79,6 +80,7 @@ export default function App() {
             <Route path="changelog" element={<Navigate to="/admin/changelog" replace />} />
             <Route path="gestor-groups" element={<Navigate to="/gestores" replace />} />
             <Route path="insights" element={<AdminInsightsPage />} />
+            <Route path="pesquisa-passagens" element={<AdminPesquisaPassagensPage />} />
             <Route path="configuracoes" element={<AdminConfigPage />} />
             <Route path="seguranca" element={<AdminSegurancaPage />} />
             <Route path="logs" element={<AuditLogsPage />} />

@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
 
 import { useAdminAuth } from "@/context/AdminAuthContext";
-import { isAdminPanelRole } from "@/lib/accessScope";
+import { useAccessScope } from "@/hooks/useAccessScope";
+import { hasFullPlatformRouteAccess, isAdminMasterRole, isAdminPanelRole } from "@/lib/accessScope";
 
 const ADMIN_GERAL_ALLOWED_PREFIXES = [
   "/dashboard",
@@ -26,12 +27,13 @@ function canAdminGeralAccess(pathname: string): boolean {
 }
 
 /**
- * Painel administrativo: `perfis.role` em { admin, admin_master }.
+ * Painel administrativo: `perfis.role` em { admin, admin_master, admin_geral }.
  * Outros roles autenticados vêem "Acesso não autorizado" (sem entrar nas rotas).
  */
 export default function RequireAdmin({ children }: { children: ReactNode }) {
   const { user, loading, role, roleLoading, subscriptionBlocked, subscriptionBlockReason, subscriptionGateLoading } =
     useAdminAuth();
+  const { scope } = useAccessScope();
   const location = useLocation();
 
   if (loading || (user && roleLoading) || (user && isAdminPanelRole(role) && subscriptionGateLoading)) {
@@ -46,7 +48,7 @@ export default function RequireAdmin({ children }: { children: ReactNode }) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 
-  if (isAdminPanelRole(role) && subscriptionBlocked) {
+  if (isAdminPanelRole(role) && subscriptionBlocked && !isAdminMasterRole(role)) {
     return (
       <div
         style={{
@@ -110,7 +112,7 @@ export default function RequireAdmin({ children }: { children: ReactNode }) {
           <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, color: "#1f1f1f" }}>Acesso não autorizado</h1>
           <p style={{ marginTop: 12, fontSize: 14, lineHeight: 1.5, color: "#6b6b6b" }}>
             O painel de administração é exclusivo para utilizadores com{" "}
-            <strong style={{ color: "#1f1f1f" }}>role admin ou admin_master</strong> na tabela{" "}
+            <strong style={{ color: "#1f1f1f" }}>role admin, admin_master ou admin_geral</strong> na tabela{" "}
             <code style={{ fontSize: 13 }}>perfis</code>.
           </p>
           <p style={{ marginTop: 8, fontSize: 13, color: "#6b6b6b" }}>
@@ -127,8 +129,14 @@ export default function RequireAdmin({ children }: { children: ReactNode }) {
     );
   }
 
-  const isAdminMaster = role === "admin_master";
-  if (!isAdminMaster && !canAdminGeralAccess(location.pathname)) {
+  if (!hasFullPlatformRouteAccess(role, scope) && !canAdminGeralAccess(location.pathname)) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  if (
+    (location.pathname === "/pesquisa-passagens" || location.pathname.startsWith("/pesquisa-passagens/")) &&
+    !isAdminMasterRole(role)
+  ) {
     return <Navigate to="/dashboard" replace />;
   }
 

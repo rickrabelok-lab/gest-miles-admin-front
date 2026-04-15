@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -24,6 +26,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { apiFetch, hasApiUrl } from "@/lib/backendApi";
+import { formatBrlFromCentavos, loadPlanosCatalog, type PlanoCatalogo } from "@/services/adminPlanosCatalog";
+import { listSubscriptionsAdmin } from "@/services/subscriptionsAdmin";
 
 type PlanRow = {
   id: string;
@@ -44,6 +48,57 @@ type SubscriptionListItem = {
   customer?: string | { id?: string } | null;
 };
 
+function normalizeSlug(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-_]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function planoToStripeLimits(plano: PlanoCatalogo): Record<string, unknown> {
+  return {
+    max_clientes: plano.max_clientes,
+    trial_dias: plano.trial_dias,
+    funcionalidades: plano.funcionalidades,
+    origem_catalogo: "planos-precos",
+  };
+}
+
+function isGatewayErrorMessage(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return (
+    m.includes("502") ||
+    m.includes("503") ||
+    m.includes("504") ||
+    m.includes("bad gateway") ||
+    m.includes("service unavailable") ||
+    m.includes("gateway timeout")
+  );
+}
+
+/** Quando o Express Stripe não responde: mostrar o mesmo catálogo que /planos (só leitura). */
+function catalogToFallbackPlanRows(catalog: PlanoCatalogo[]): PlanRow[] {
+  return catalog.map((plano, i) => ({
+    id: `local-preview-${plano.id}`,
+    slug: normalizeSlug(plano.id || plano.nome),
+    name: plano.nome,
+    description: plano.descricao || null,
+    stripe_product_id: "—",
+    stripe_price_id_monthly: null,
+    stripe_price_id_yearly: null,
+    active: plano.status === "ativo",
+    sort_order: i,
+    limits: {
+      ...planoToStripeLimits(plano),
+      preview_preco_mensal_centavos: plano.preco_mensal_centavos,
+      preview_only: true,
+    },
+  }));
+}
+
 export default function MonetizacaoPage() {
   const { session } = useAdminAuth();
   const token = session?.access_token;
@@ -53,6 +108,14 @@ export default function MonetizacaoPage() {
   const [loadingPlans, setLoadingPlans] = useState(true);
   const [loadingSubs, setLoadingSubs] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [syncingCatalog, setSyncingCatalog] = useState(false);
+  /** Mensagem de sucesso da sincronização (evita usar a faixa vermelha de erro). */
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
+  /** Stripe API acessível vs pré-visualização do catálogo local (502). */
+  const [planosSource, setPlanosSource] = useState<"stripe" | "local_preview">("stripe");
+  const [stripePlanosWarning, setStripePlanosWarning] = useState<string | null>(null);
+  const [assinaturasSource, setAssinaturasSource] = useState<"stripe" | "supabase_fallback">("stripe");
+  const [stripeAssinaturasWarning, setStripeAssinaturasWarning] = useState<string | null>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [newSlug, setNewSlug] = useState("");
@@ -68,27 +131,86 @@ export default function MonetizacaoPage() {
   const loadPlans = useCallback(async () => {
     if (!token || !hasApiUrl()) return;
     setLoadingPlans(true);
-    setError(null);
+    setStripePlanosWarning(null);
     try {
       const data = await apiFetch<{ plans: PlanRow[] }>("/api/stripe/admin/plans", { token });
       setPlans(data.plans);
+      setPlanosSource("stripe");
+      setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro ao carregar planos.");
+      const msg = e instanceof Error ? e.message : "Erro ao carregar planos.";
+      if (isGatewayErrorMessage(msg)) {
+        setPlans(catalogToFallbackPlanRows(loadPlanosCatalog()));
+        setPlanosSource("local_preview");
+        setError(null);
+        setStripePlanosWarning(
+          "O backend Stripe não respondeu (gateway). A tabela abaixo é uma pré-visualização do catálogo de Planos & Preços (local). " +
+            "Arranque o Express com /api/stripe/admin/* ou corrija VITE_API_PROXY_TARGET.",
+        );
+      } else {
+        setPlans([]);
+        setPlanosSource("stripe");
+        setError(msg);
+      }
     } finally {
       setLoadingPlans(false);
     }
   }, [token]);
 
   const loadSubs = useCallback(async () => {
-    if (!token || !hasApiUrl()) return;
+    if (!token) return;
     setLoadingSubs(true);
-    setError(null);
+    setStripeAssinaturasWarning(null);
     try {
-      const data = await apiFetch<{ subscriptions: SubscriptionListItem[] }>(
-        "/api/stripe/admin/subscriptions?limit=50",
-        { token },
-      );
-      setSubs(data.subscriptions);
+      if (hasApiUrl()) {
+        try {
+          const data = await apiFetch<{ subscriptions: SubscriptionListItem[] }>(
+            "/api/stripe/admin/subscriptions?limit=50",
+            { token },
+          );
+          setSubs(data.subscriptions);
+          setAssinaturasSource("stripe");
+          setError(null);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "Erro ao carregar assinaturas.";
+          if (isGatewayErrorMessage(msg)) {
+            const { rows, available } = await listSubscriptionsAdmin();
+            if (!available) {
+              setSubs([]);
+            } else {
+              setSubs(
+                rows.map((r) => ({
+                  id: r.id,
+                  status: r.status,
+                  customer: r.label,
+                })),
+              );
+            }
+            setAssinaturasSource("supabase_fallback");
+            setStripeAssinaturasWarning(
+              "API Stripe indisponível: lista abaixo vem da tabela subscriptions no Supabase (se existir e RLS permitir).",
+            );
+            setError(null);
+          } else {
+            throw e;
+          }
+        }
+      } else {
+        const { rows, available } = await listSubscriptionsAdmin();
+        if (!available) {
+          setSubs([]);
+        } else {
+          setSubs(
+            rows.map((r) => ({
+              id: r.id,
+              status: r.status,
+              customer: r.label,
+            })),
+          );
+        }
+        setAssinaturasSource("supabase_fallback");
+        setError(null);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao carregar assinaturas.");
     } finally {
@@ -97,11 +219,22 @@ export default function MonetizacaoPage() {
   }, [token]);
 
   useEffect(() => {
+    if (!token) {
+      setLoadingPlans(false);
+      return;
+    }
+    if (!hasApiUrl()) {
+      setPlans([]);
+      setPlanosSource("stripe");
+      setStripePlanosWarning(null);
+      setLoadingPlans(false);
+      return;
+    }
     void loadPlans();
-  }, [loadPlans]);
+  }, [token, loadPlans]);
 
   const handleCreatePlan = async () => {
-    if (!token) return;
+    if (!token || !hasApiUrl() || planosSource === "local_preview") return;
     const monthlyCents = Math.round(parseFloat(newMonthly.replace(",", ".")) * 100);
     if (!newSlug.trim() || !newName.trim() || !Number.isFinite(monthlyCents) || monthlyCents <= 0) {
       setError("Preencha slug, nome e valor mensal válido (ex.: 99.90).");
@@ -150,7 +283,7 @@ export default function MonetizacaoPage() {
   };
 
   const handleSaveEdit = async () => {
-    if (!token || !editPlan) return;
+    if (!token || !hasApiUrl() || !editPlan) return;
     try {
       await apiFetch(`/api/stripe/admin/plans/${encodeURIComponent(editPlan.slug)}`, {
         method: "PATCH",
@@ -171,7 +304,7 @@ export default function MonetizacaoPage() {
   };
 
   const handleUpdatePrices = async () => {
-    if (!token || !pricePlan) return;
+    if (!token || !hasApiUrl() || !pricePlan) return;
     const m = prompt("Novo preço mensal (BRL, ex.: 99.90) — deixe vazio para não alterar:");
     const y = prompt("Novo preço anual (BRL) — deixe vazio para não alterar:");
     const body: { monthlyAmountCents?: number; yearlyAmountCents?: number } = {};
@@ -201,7 +334,7 @@ export default function MonetizacaoPage() {
   };
 
   const subAction = async (path: string, body?: Record<string, unknown>) => {
-    if (!token) return;
+    if (!token || !hasApiUrl()) return;
     try {
       await apiFetch(path, { method: "POST", token, body: JSON.stringify(body ?? {}) });
       await loadSubs();
@@ -210,31 +343,141 @@ export default function MonetizacaoPage() {
     }
   };
 
-  if (!hasApiUrl()) {
-    return (
-      <div className="mx-auto max-w-lg p-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>API não configurada</CardTitle>
-            <CardDescription>
-              Define <code className="text-xs">VITE_API_URL</code> no <code>.env.local</code> apontando para o
-              backend Express do projeto (ex.: <code>http://localhost:3000</code>).
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
-    );
-  }
+  const handleSyncFromPlanosCatalog = async () => {
+    if (!token || !hasApiUrl() || planosSource === "local_preview") return;
+    setSyncingCatalog(true);
+    setError(null);
+    setSyncNotice(null);
+    try {
+      const catalog = loadPlanosCatalog();
+      if (catalog.length === 0) {
+        setError("Não há planos no catálogo local de /planos para sincronizar.");
+        return;
+      }
+
+      const bySlug = new Map<string, PlanRow>();
+      for (const p of plans) bySlug.set(normalizeSlug(p.slug), p);
+
+      let created = 0;
+      let updated = 0;
+      let failed = 0;
+      const failures: string[] = [];
+
+      for (let i = 0; i < catalog.length; i++) {
+        const plano = catalog[i]!;
+        const slug = normalizeSlug(plano.id || plano.nome);
+        if (!slug) continue;
+        const existing = bySlug.get(slug);
+        try {
+          if (!existing) {
+            await apiFetch("/api/stripe/admin/plans", {
+              method: "POST",
+              token,
+              body: JSON.stringify({
+                slug,
+                name: plano.nome.trim(),
+                description: plano.descricao?.trim() || undefined,
+                monthlyAmountCents: plano.preco_mensal_centavos,
+                currency: "brl",
+                limits: planoToStripeLimits(plano),
+              }),
+            });
+            created += 1;
+          } else {
+            await apiFetch(`/api/stripe/admin/plans/${encodeURIComponent(slug)}`, {
+              method: "PATCH",
+              token,
+              body: JSON.stringify({
+                name: plano.nome.trim(),
+                description: plano.descricao?.trim() || null,
+                active: plano.status === "ativo",
+                limits: planoToStripeLimits(plano),
+                sortOrder: i + 1,
+              }),
+            });
+            updated += 1;
+          }
+        } catch (e) {
+          failed += 1;
+          failures.push(`${slug}: ${e instanceof Error ? e.message : "erro desconhecido"}`);
+        }
+      }
+
+      await loadPlans();
+      if (failed > 0) {
+        const hint502 = failures.some((f) => f.includes("502") || f.includes("Bad Gateway") || f.includes("503") || f.includes("504"))
+          ? " Se todos forem 502/503: o Express com Stripe não está acessível no endereço do proxy — não é falha do catálogo /planos."
+          : "";
+        setError(
+          `Sincronização parcial. Criados: ${created}, atualizados: ${updated}, falhas: ${failed}. ` +
+            failures.slice(0, 3).join(" | ") +
+            hint502,
+        );
+      } else {
+        setSyncNotice(`Sincronização concluída. Criados: ${created}, atualizados: ${updated}.`);
+      }
+    } finally {
+      setSyncingCatalog(false);
+    }
+  };
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-8">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Monetização Stripe</h1>
         <p className="text-sm text-muted-foreground">
-          Planos e assinaturas na API Stripe. Requer perfil <strong>admin</strong> e webhook configurado no backend.
+          Com <code className="text-xs">VITE_API_URL</code>, o painel fala com o backend Express (Stripe). Sem essa variável,
+          as assinaturas listadas abaixo vêm da tabela <code className="text-xs">subscriptions</code> no Supabase; criar planos no Stripe e acções de
+          cancelar/pausar exigem o backend.
         </p>
       </div>
 
+      {!hasApiUrl() ? (
+        <Alert>
+          <AlertTitle>Backend opcional</AlertTitle>
+          <AlertDescription className="space-y-2">
+            <p>
+              Para sincronizar <strong>produtos e preços</strong> directamente na API Stripe, define{" "}
+              <code className="rounded bg-muted px-1 text-xs">VITE_API_URL</code> no ficheiro{" "}
+              <code className="rounded bg-muted px-1 text-xs">apps/admin-app/.env.local</code> (ex.:{" "}
+              <code className="rounded bg-muted px-1 text-xs">http://localhost:3000</code>) apontando para o servidor Express
+              que expõe <code className="rounded bg-muted px-1 text-xs">/api/stripe/admin/*</code>.
+            </p>
+            <p>
+              O catálogo de planos comercial do painel continua disponível em{" "}
+              <Link to="/planos" className="font-semibold text-primary underline-offset-4 hover:underline">
+                Planos &amp; Preços
+              </Link>
+              .
+            </p>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {syncNotice ? (
+        <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-900 dark:text-emerald-100">
+          {syncNotice}
+          <Button variant="ghost" size="sm" className="ml-2 h-6" onClick={() => setSyncNotice(null)}>
+            Fechar
+          </Button>
+        </div>
+      ) : null}
+      {stripePlanosWarning ? (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
+          {stripePlanosWarning}
+          <Button variant="ghost" size="sm" className="ml-2 h-6" onClick={() => setStripePlanosWarning(null)}>
+            Fechar
+          </Button>
+        </div>
+      ) : null}
+      {stripeAssinaturasWarning ? (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
+          {stripeAssinaturasWarning}
+          <Button variant="ghost" size="sm" className="ml-2 h-6" onClick={() => setStripeAssinaturasWarning(null)}>
+            Fechar
+          </Button>
+        </div>
+      ) : null}
       {error && (
         <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
@@ -253,16 +496,46 @@ export default function MonetizacaoPage() {
         </TabsList>
 
         <TabsContent value="planos" className="space-y-4">
-          <div className="flex justify-end">
-            <Button onClick={() => setCreateOpen(true)}>Novo plano</Button>
-          </div>
+          {hasApiUrl() ? (
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => void handleSyncFromPlanosCatalog()}
+                disabled={syncingCatalog || planosSource === "local_preview"}
+                title={planosSource === "local_preview" ? "Sincronização requer o backend Stripe a responder." : undefined}
+              >
+                {syncingCatalog ? "Sincronizando..." : "Trazer de /planos"}
+              </Button>
+              <Button
+                onClick={() => setCreateOpen(true)}
+                disabled={planosSource === "local_preview"}
+                title={planosSource === "local_preview" ? "Criar plano requer o backend Stripe." : undefined}
+              >
+                Novo plano
+              </Button>
+            </div>
+          ) : null}
           <Card>
             <CardHeader>
               <CardTitle>Planos</CardTitle>
-              <CardDescription>Produtos e preços sincronizados com o Stripe.</CardDescription>
+              <CardDescription>
+                {!hasApiUrl()
+                  ? "Sem backend configurado, estes planos Stripe não são carregados aqui. Usa Planos & Preços para o catálogo do painel."
+                  : planosSource === "local_preview"
+                    ? "Pré-visualização do catálogo local (mesmo conteúdo que /planos). O backend Stripe não respondeu — não são price IDs reais."
+                    : "Produtos e preços sincronizados com o Stripe."}
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              {loadingPlans ? (
+              {!hasApiUrl() ? (
+                <p className="text-sm text-muted-foreground">
+                  Configura <code className="text-xs">VITE_API_URL</code> para listar e criar planos na API Stripe, ou gere o catálogo em{" "}
+                  <Link to="/planos" className="font-medium text-primary underline-offset-4 hover:underline">
+                    /planos
+                  </Link>
+                  .
+                </p>
+              ) : loadingPlans ? (
                 <p className="text-sm text-muted-foreground">A carregar…</p>
               ) : (
                 <Table>
@@ -281,15 +554,39 @@ export default function MonetizacaoPage() {
                         <TableCell className="font-mono text-xs">{p.slug}</TableCell>
                         <TableCell>{p.name}</TableCell>
                         <TableCell>{p.active ? "Sim" : "Não"}</TableCell>
-                        <TableCell className="max-w-[200px] truncate text-xs text-muted-foreground">
-                          M: {p.stripe_price_id_monthly ?? "—"} <br />
-                          A: {p.stripe_price_id_yearly ?? "—"}
+                        <TableCell className="max-w-[200px] text-xs text-muted-foreground">
+                          {planosSource === "local_preview" &&
+                          typeof p.limits.preview_preco_mensal_centavos === "number" ? (
+                            <>
+                              <span className="text-foreground">
+                                {formatBrlFromCentavos(p.limits.preview_preco_mensal_centavos)}
+                              </span>
+                              <span className="block text-[10px]">(catálogo /planos)</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="truncate">
+                                M: {p.stripe_price_id_monthly ?? "—"} <br />
+                                A: {p.stripe_price_id_yearly ?? "—"}
+                              </span>
+                            </>
+                          )}
                         </TableCell>
                         <TableCell className="space-x-2 text-right">
-                          <Button variant="outline" size="sm" onClick={() => setEditPlan({ ...p })}>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={planosSource === "local_preview"}
+                            onClick={() => setEditPlan({ ...p })}
+                          >
                             Editar
                           </Button>
-                          <Button variant="secondary" size="sm" onClick={() => setPricePlan(p)}>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            disabled={planosSource === "local_preview"}
+                            onClick={() => setPricePlan(p)}
+                          >
                             Novos preços
                           </Button>
                         </TableCell>
@@ -306,8 +603,20 @@ export default function MonetizacaoPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
-                <CardTitle>Assinaturas Stripe</CardTitle>
-                <CardDescription>Lista direta da API Stripe (ambiente da chave configurada).</CardDescription>
+                <CardTitle>
+                  {!hasApiUrl()
+                    ? "Assinaturas (Supabase)"
+                    : assinaturasSource === "stripe"
+                      ? "Assinaturas Stripe"
+                      : "Assinaturas (Supabase)"}
+                </CardTitle>
+                <CardDescription>
+                  {!hasApiUrl()
+                    ? "Dados da tabela subscriptions no Supabase. Acções cancelar/pausar/retomar exigem VITE_API_URL + backend Stripe."
+                    : assinaturasSource === "stripe"
+                      ? "Lista direta da API Stripe (ambiente da chave configurada no backend)."
+                      : "Fallback: API Stripe indisponível — dados da tabela subscriptions no Supabase. Acções cancelar/pausar/retomar exigem o backend."}
+                </CardDescription>
               </div>
               <Button variant="outline" size="sm" onClick={() => void loadSubs()} disabled={loadingSubs}>
                 Atualizar
@@ -339,31 +648,37 @@ export default function MonetizacaoPage() {
                               : "—"}
                         </TableCell>
                         <TableCell className="space-x-1 text-right">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() =>
-                              subAction(`/api/stripe/admin/subscriptions/${s.id}/cancel`, {
-                                cancelAtPeriodEnd: true,
-                              })
-                            }
-                          >
-                            Cancelar no fim
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => subAction(`/api/stripe/admin/subscriptions/${s.id}/pause`)}
-                          >
-                            Pausar
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => subAction(`/api/stripe/admin/subscriptions/${s.id}/resume`)}
-                          >
-                            Retomar
-                          </Button>
+                          {hasApiUrl() && assinaturasSource === "stripe" ? (
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() =>
+                                  subAction(`/api/stripe/admin/subscriptions/${s.id}/cancel`, {
+                                    cancelAtPeriodEnd: true,
+                                  })
+                                }
+                              >
+                                Cancelar no fim
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => subAction(`/api/stripe/admin/subscriptions/${s.id}/pause`)}
+                              >
+                                Pausar
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => subAction(`/api/stripe/admin/subscriptions/${s.id}/resume`)}
+                              >
+                                Retomar
+                              </Button>
+                            </>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}

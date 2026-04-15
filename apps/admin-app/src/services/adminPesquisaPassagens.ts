@@ -1,0 +1,128 @@
+import { supabase } from "@/lib/supabase";
+
+export interface PesquisaPassagensPlanLimitEntry {
+  max_searches_per_day?: number | null;
+  max_searches_equipe_per_day?: number | null;
+  monthly_token_allowance?: number | null;
+  monthly_token_allowance_equipe?: number | null;
+}
+
+export interface PesquisaPassagensConfigAdmin {
+  id: number;
+  feature_enabled: boolean;
+  allowed_roles: string[] | null;
+  allowed_equipe_ids: string[] | null;
+  denied_usuario_ids: string[] | null;
+  allowed_plan_slugs: string[] | null;
+  max_searches_user_per_day: number | null;
+  max_searches_equipe_per_day: number | null;
+  destination_images: Record<string, string>;
+  tokens_per_search: number;
+  monthly_token_allowance_user: number | null;
+  monthly_token_allowance_equipe: number | null;
+  plan_limits: Record<string, PesquisaPassagensPlanLimitEntry> | null;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+function parseRow(raw: Record<string, unknown>): PesquisaPassagensConfigAdmin {
+  const dest = raw.destination_images;
+  const plan = raw.plan_limits;
+  return {
+    id: Number(raw.id ?? 1),
+    feature_enabled: Boolean(raw.feature_enabled),
+    allowed_roles: (raw.allowed_roles as string[] | null) ?? null,
+    allowed_equipe_ids: (raw.allowed_equipe_ids as string[] | null) ?? null,
+    denied_usuario_ids: (raw.denied_usuario_ids as string[] | null) ?? null,
+    allowed_plan_slugs: (raw.allowed_plan_slugs as string[] | null) ?? null,
+    max_searches_user_per_day:
+      raw.max_searches_user_per_day == null ? null : Number(raw.max_searches_user_per_day),
+    max_searches_equipe_per_day:
+      raw.max_searches_equipe_per_day == null ? null : Number(raw.max_searches_equipe_per_day),
+    destination_images:
+      dest && typeof dest === "object" && !Array.isArray(dest) ? (dest as Record<string, string>) : {},
+    tokens_per_search:
+      raw.tokens_per_search == null || raw.tokens_per_search === ""
+        ? 1
+        : Math.max(1, Math.floor(Number(raw.tokens_per_search))),
+    monthly_token_allowance_user:
+      raw.monthly_token_allowance_user == null ? null : Number(raw.monthly_token_allowance_user),
+    monthly_token_allowance_equipe:
+      raw.monthly_token_allowance_equipe == null ? null : Number(raw.monthly_token_allowance_equipe),
+    plan_limits:
+      plan && typeof plan === "object" && !Array.isArray(plan)
+        ? (plan as Record<string, PesquisaPassagensPlanLimitEntry>)
+        : null,
+    updated_at: raw.updated_at != null ? String(raw.updated_at) : null,
+    updated_by: raw.updated_by != null ? String(raw.updated_by) : null,
+  };
+}
+
+export async function fetchPesquisaPassagensConfig(): Promise<{
+  data: PesquisaPassagensConfigAdmin | null;
+  error: string | null;
+}> {
+  const { data, error } = await supabase.from("pesquisa_passagens_config").select("*").eq("id", 1).maybeSingle();
+  if (error) return { data: null, error: error.message };
+  if (!data) {
+    return {
+      data: {
+        id: 1,
+        feature_enabled: true,
+        allowed_roles: null,
+        allowed_equipe_ids: null,
+        denied_usuario_ids: null,
+        allowed_plan_slugs: null,
+        max_searches_user_per_day: null,
+        max_searches_equipe_per_day: null,
+        destination_images: {},
+        tokens_per_search: 1,
+        monthly_token_allowance_user: null,
+        monthly_token_allowance_equipe: null,
+        plan_limits: null,
+        updated_at: null,
+        updated_by: null,
+      },
+      error: null,
+    };
+  }
+  return { data: parseRow(data as Record<string, unknown>), error: null };
+}
+
+export async function savePesquisaPassagensConfig(input: {
+  feature_enabled: boolean;
+  allowed_roles: string[] | null;
+  allowed_equipe_ids: string[] | null;
+  denied_usuario_ids: string[] | null;
+  allowed_plan_slugs: string[] | null;
+  max_searches_user_per_day: number | null;
+  max_searches_equipe_per_day: number | null;
+  destination_images: Record<string, string>;
+  tokens_per_search: number;
+  monthly_token_allowance_user: number | null;
+  monthly_token_allowance_equipe: number | null;
+  plan_limits: Record<string, PesquisaPassagensPlanLimitEntry> | null;
+  updated_by: string | null;
+}): Promise<{ error: string | null }> {
+  const { error } = await supabase.from("pesquisa_passagens_config").upsert(
+    {
+      id: 1,
+      feature_enabled: input.feature_enabled,
+      allowed_roles: input.allowed_roles,
+      allowed_equipe_ids: input.allowed_equipe_ids,
+      denied_usuario_ids: input.denied_usuario_ids,
+      allowed_plan_slugs: input.allowed_plan_slugs,
+      max_searches_user_per_day: input.max_searches_user_per_day,
+      max_searches_equipe_per_day: input.max_searches_equipe_per_day,
+      destination_images: input.destination_images,
+      tokens_per_search: Math.max(1, input.tokens_per_search),
+      monthly_token_allowance_user: input.monthly_token_allowance_user,
+      monthly_token_allowance_equipe: input.monthly_token_allowance_equipe,
+      plan_limits: input.plan_limits,
+      updated_at: new Date().toISOString(),
+      updated_by: input.updated_by,
+    },
+    { onConflict: "id" },
+  );
+  return { error: error?.message ?? null };
+}

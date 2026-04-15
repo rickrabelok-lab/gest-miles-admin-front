@@ -6,7 +6,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { useAdminEquipe } from "@/context/AdminEquipeContext";
 import { useAccessScope } from "@/hooks/useAccessScope";
-import { canAccessAppConfig, canAccessSecurityDashboard } from "@/lib/accessScope";
+import {
+  canAccessAppConfig,
+  canAccessSecurityDashboard,
+  hasFullPlatformRouteAccess,
+  isAdminGeralRole,
+  isAdminMasterRole,
+} from "@/lib/accessScope";
 import { countB2cClientesSemEquipe } from "@/lib/adminApi";
 import { countBetaFlagsInStorage } from "@/services/adminFeatureFlagsStore";
 import { countLgpdPendentes, loadBackupsLgpdState, loadBackupsLgpdStateFromBackend } from "@/services/adminBackupsLgpdStore";
@@ -37,6 +43,7 @@ const ROUTE_TITLES: { prefix: string; title: string }[] = [
   { prefix: "/contas/", title: "Conta do utilizador" },
   { prefix: "/dashboard", title: "Dashboard" },
   { prefix: "/insights", title: "Insights" },
+  { prefix: "/pesquisa-passagens", title: "Pesquisa de passagens" },
   { prefix: "/equipes", title: "Equipes de Gestão" },
   { prefix: "/users", title: "Usuários" },
   { prefix: "/clients", title: "Usuários B2C" },
@@ -275,6 +282,15 @@ function NavIconChangelog({ className }: { className?: string }) {
   );
 }
 
+function NavIconPlane({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M1.5 10.5 14.5 8 1.5 5.5v2.5l3 1-3 1v2.5Z" />
+      <path d="M4.5 8h3.5" />
+    </svg>
+  );
+}
+
 type NavEntry = {
   to: string;
   label: string;
@@ -289,6 +305,7 @@ const NAV_GROUPS: { label: string; items: NavEntry[] }[] = [
     items: [
       { to: "/dashboard", label: "Dashboard", Icon: NavIconDashboard, end: true },
       { to: "/insights", label: "Insights", Icon: NavIconChart, badge: { text: "Novo", kind: "ok" } },
+      { to: "/pesquisa-passagens", label: "Pesquisa passagens", Icon: NavIconPlane, badge: { text: "Gestor", kind: "ok" } },
     ],
   },
   {
@@ -435,8 +452,14 @@ export default function AdminAppLayout() {
     return equipes.find((e) => e.id === selectedEquipeId)?.nome ?? selectedEquipeId;
   }, [selectedEquipeId, equipeNomeEdicaoDraft, equipes]);
 
-  const roleLabel = role === "admin_master" || scope?.kind === "global_admin" ? "Admin Master" : "Admin";
-  const isAdminMaster = role === "admin_master" || scope?.kind === "global_admin";
+  const roleLabel = isAdminMasterRole(role)
+    ? "Admin Master"
+    : isAdminGeralRole(role)
+      ? "Admin Geral"
+      : scope?.kind === "global_admin"
+        ? "Administrador global"
+        : "Admin";
+  const hasFullNav = hasFullPlatformRouteAccess(role, scope);
 
   const canAdminGeralAccessPath = useMemo(() => {
     return (path: string) =>
@@ -447,19 +470,20 @@ export default function AdminAppLayout() {
     return NAV_GROUPS.map((g) => ({
       ...g,
       items: g.items.filter((item) => {
-        if (!isAdminMaster && !canAdminGeralAccessPath(item.to)) return false;
+        if (item.to === "/pesquisa-passagens" && !isAdminMasterRole(role)) return false;
+        if (!hasFullNav && !canAdminGeralAccessPath(item.to)) return false;
         if (item.to === "/seguranca") return canAccessSecurityDashboard(scope);
         if (item.to === "/configuracoes") return canAccessAppConfig(scope);
         return true;
       }),
     })).filter((g) => g.items.length > 0);
-  }, [scope, isAdminMaster, canAdminGeralAccessPath]);
+  }, [scope, hasFullNav, canAdminGeralAccessPath, role]);
 
   useEffect(() => {
-    if (!role || isAdminMaster) return;
+    if (!role || hasFullNav) return;
     if (canAdminGeralAccessPath(pathname)) return;
     navigate("/dashboard", { replace: true });
-  }, [role, isAdminMaster, pathname, navigate, canAdminGeralAccessPath]);
+  }, [role, hasFullNav, pathname, navigate, canAdminGeralAccessPath]);
 
   const equipeNomeLocked = equipeSelectionLocked
     ? nomeEquipeSelecionadaExibicao ?? selectedEquipeId
@@ -557,7 +581,15 @@ export default function AdminAppLayout() {
             <div className="sb-logo-brand">
               Gest<span>Miles</span>
             </div>
-            <div className="sb-admin-badge">⚡ Admin Master</div>
+            <div className="sb-admin-badge">
+              {isAdminMasterRole(role)
+                ? "⚡ Admin Master"
+                : isAdminGeralRole(role)
+                  ? "Admin Geral"
+                  : scope?.kind === "global_admin"
+                    ? "Administrador global"
+                    : "Admin"}
+            </div>
           </div>
         </div>
 

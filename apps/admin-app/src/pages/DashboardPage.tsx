@@ -81,7 +81,7 @@ export default function DashboardPage() {
   /** KPIs por equipe só fazem sentido com uma equipe escolhida no filtro. */
   const showEquipeKpis = Boolean(selectedEquipeId);
   const equipeKpiTitle = equipeNome?.trim() || (selectedEquipeId ? "Equipe" : "");
-  const showGlobal = scope?.kind === "global_admin";
+  const showGlobal = scope?.kind === "global_admin" || scope?.kind === "admin_geral";
 
   const reload = () => {
     void (async () => {

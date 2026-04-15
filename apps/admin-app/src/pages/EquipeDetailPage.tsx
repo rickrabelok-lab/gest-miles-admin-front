@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAdminEquipe } from "@/context/AdminEquipeContext";
 import { useAccessScope } from "@/hooks/useAccessScope";
-import { canManageEquipesGlobally } from "@/lib/accessScope";
+import { canManageEquipesGlobally, canViewGlobalEquipesList } from "@/lib/accessScope";
 import {
   formatSupabaseError,
   listCsPerfis,
@@ -89,7 +89,9 @@ type DetailTab = "visao" | "membros" | "clientes" | "config";
 export default function EquipeDetailPage() {
   const { scope } = useAccessScope();
   const { setEquipeNomeEdicaoDraft, patchEquipeNomeInList } = useAdminEquipe();
-  const allowGlobalEquipes = canManageEquipesGlobally(scope);
+  const canViewGlobalEquipes = canViewGlobalEquipesList(scope);
+  const canManageGlobalEquipes = canManageEquipesGlobally(scope);
+  const equipesReadOnly = canViewGlobalEquipes && !canManageGlobalEquipes;
   const { equipeId } = useParams<{ equipeId: string }>();
   const groupId = equipeId ?? "";
 
@@ -195,22 +197,22 @@ export default function EquipeDetailPage() {
   };
 
   useEffect(() => {
-    if (!allowGlobalEquipes) {
+    if (!canViewGlobalEquipes) {
       setLoading(false);
       return;
     }
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allowGlobalEquipes, equipeId]);
+  }, [canViewGlobalEquipes, equipeId]);
 
   useEffect(() => {
-    if (!allowGlobalEquipes || !equipeId || !equipe) {
+    if (!canManageGlobalEquipes || !equipeId || !equipe) {
       setEquipeNomeEdicaoDraft(null);
       return;
     }
     setEquipeNomeEdicaoDraft({ equipeId, nome });
     return () => setEquipeNomeEdicaoDraft(null);
-  }, [allowGlobalEquipes, equipeId, nome, equipe, setEquipeNomeEdicaoDraft]);
+  }, [canManageGlobalEquipes, equipeId, nome, equipe, setEquipeNomeEdicaoDraft]);
 
   const gestoresDisponiveis = useMemo(() => {
     if (!equipeId) return [];
@@ -333,6 +335,27 @@ export default function EquipeDetailPage() {
 
   const nMembrosTab = linhasMembros.length;
 
+  useEffect(() => {
+    if (equipesReadOnly && tab === "config") setTab("visao");
+  }, [equipesReadOnly, tab]);
+
+  const detailTabs = useMemo(
+    () =>
+      equipesReadOnly
+        ? ([
+            ["visao", "Visão Geral"],
+            ["membros", "Membros", nMembrosTab],
+            ["clientes", "Clientes", nClientesEquipe],
+          ] as const)
+        : ([
+            ["visao", "Visão Geral"],
+            ["membros", "Membros", nMembrosTab],
+            ["clientes", "Clientes", nClientesEquipe],
+            ["config", "Configurações"],
+          ] as const),
+    [equipesReadOnly, nMembrosTab, nClientesEquipe],
+  );
+
   const criadaLabel = useMemo(() => {
     const raw = equipe?.created_at;
     if (!raw) return "—";
@@ -341,7 +364,7 @@ export default function EquipeDetailPage() {
     return d.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
   }, [equipe?.created_at]);
 
-  if (!allowGlobalEquipes) {
+  if (!canViewGlobalEquipes) {
     return (
       <div className="table-card" style={{ maxWidth: 480 }}>
         <div className="tc-header">
@@ -359,6 +382,23 @@ export default function EquipeDetailPage() {
   return (
     <div className="eq-detail-root" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {error ? <p style={{ fontSize: 13, color: "var(--err)" }}>{error}</p> : null}
+      {equipesReadOnly ? (
+        <p
+          style={{
+            fontSize: 12,
+            color: "var(--t2)",
+            margin: 0,
+            padding: "10px 14px",
+            background: "#F5F3FF",
+            border: "1px solid #E9D5FF",
+            borderRadius: 10,
+            lineHeight: 1.45,
+          }}
+        >
+          <strong>Modo consulta.</strong> O admin geral pode visualizar equipes e membros; criar ou alterar equipes, slots e configurações fica reservado ao
+          administrador global ou admin master.
+        </p>
+      ) : null}
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <Link to="/equipes" className="btn-outline" style={{ height: 32, padding: "0 12px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -369,12 +409,14 @@ export default function EquipeDetailPage() {
         </Link>
         <div style={{ fontSize: 18, fontWeight: 800, color: "var(--t1)", letterSpacing: "-0.3px" }}>{nome}</div>
         <span className="badge badge-ok">Ativa</span>
-        <button type="button" className="eq-btn-sm eq-btn-sm-o" style={{ marginLeft: "auto" }} onClick={() => setTab("config")}>
-          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
-            <path d="M7.5 1.5L9.5 3.5 3.5 9.5H1.5V7.5L7.5 1.5Z" />
-          </svg>
-          Editar equipe
-        </button>
+        {!equipesReadOnly ? (
+          <button type="button" className="eq-btn-sm eq-btn-sm-o" style={{ marginLeft: "auto" }} onClick={() => setTab("config")}>
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
+              <path d="M7.5 1.5L9.5 3.5 3.5 9.5H1.5V7.5L7.5 1.5Z" />
+            </svg>
+            Editar equipe
+          </button>
+        ) : null}
       </div>
 
       <div className="eq-hero-stats-grid">
@@ -418,14 +460,7 @@ export default function EquipeDetailPage() {
       <div className="table-card" style={{ overflow: "visible" }}>
         <div style={{ padding: "0 18px", borderBottom: "1.5px solid var(--bd)" }}>
           <div className="eq-tabs" role="tablist">
-            {(
-              [
-                ["visao", "Visão Geral"],
-                ["membros", "Membros", nMembrosTab],
-                ["clientes", "Clientes", nClientesEquipe],
-                ["config", "Configurações"],
-              ] as const
-            ).map((item) => {
+            {detailTabs.map((item) => {
               const id = item[0];
               const label = item[1];
               const count = item[2] as number | undefined;
@@ -506,6 +541,7 @@ export default function EquipeDetailPage() {
                 type="button"
                 variant="outline"
                 size="sm"
+                disabled={equipesReadOnly}
                 onClick={() => {
                   if (!equipeId) return;
                   const next = slotCount + 1;
@@ -527,6 +563,7 @@ export default function EquipeDetailPage() {
                   <div className="grid gap-2 md:grid-cols-3">
                     <select
                       className="h-8 rounded-md border bg-background px-2 text-xs"
+                      disabled={equipesReadOnly}
                       value={nacionalId}
                       onChange={async (e) => {
                         const newId = e.target.value;
@@ -566,6 +603,7 @@ export default function EquipeDetailPage() {
                     </select>
                     <select
                       className="h-8 rounded-md border bg-background px-2 text-xs"
+                      disabled={equipesReadOnly}
                       value={internacionalId}
                       onChange={async (e) => {
                         const newId = e.target.value;
@@ -612,6 +650,7 @@ export default function EquipeDetailPage() {
                       <div className="flex items-center gap-2">
                         <select
                           className="h-8 flex-1 rounded-md border bg-background px-2 text-xs"
+                          disabled={equipesReadOnly}
                           value={csPickBySlot[slot] ?? ""}
                           onChange={(e) =>
                             setCsPickBySlot((prev) => ({
@@ -631,7 +670,7 @@ export default function EquipeDetailPage() {
                           type="button"
                           variant="outline"
                           size="sm"
-                          disabled={!csPickBySlot[slot]}
+                          disabled={equipesReadOnly || !csPickBySlot[slot]}
                           onClick={async () => {
                             const picked = csPickBySlot[slot];
                             if (!picked) return;
@@ -668,7 +707,7 @@ export default function EquipeDetailPage() {
                                 }
                               >
                                 <span className="truncate">{cs?.nome_completo ?? id}</span>
-                                {slotCsSelecionadoParaRemover[slot] === id ? (
+                                {slotCsSelecionadoParaRemover[slot] === id && !equipesReadOnly ? (
                                   <Button
                                     type="button"
                                     variant="ghost"
@@ -704,6 +743,7 @@ export default function EquipeDetailPage() {
 
         {tab === "membros" ? (
           <div>
+            {!equipesReadOnly ? (
             <div className="eq-invite-form">
               <input className="eq-finput" placeholder="E-mail do novo membro..." value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} />
               <select className="eq-fselect" value={inviteRole} onChange={(e) => setInviteRole(e.target.value as typeof inviteRole)}>
@@ -719,6 +759,7 @@ export default function EquipeDetailPage() {
                 Convidar
               </button>
             </div>
+            ) : null}
             {linhasMembros.map((row, idx) => {
               const g = avatarGrad(row.perfil.usuario_id, idx);
               const labelRole = row.kind === "admin_equipe" ? "Admin Equipe" : row.kind === "gestor" ? "Gestor" : "CS";
@@ -751,6 +792,7 @@ export default function EquipeDetailPage() {
               </button>
             </div>
 
+            {!equipesReadOnly ? (
             <div style={{ padding: "18px 20px", borderTop: "1px solid var(--bd)" }}>
               <div className="kpi-section-title" style={{ marginBottom: 12 }}>
                 Incluir no grupo
@@ -887,6 +929,11 @@ export default function EquipeDetailPage() {
             </div>
           </div>
             </div>
+            ) : (
+              <p style={{ fontSize: 12, color: "var(--t3)", padding: "14px 20px 18px", margin: 0, borderTop: "1px solid var(--bd)", lineHeight: 1.45 }}>
+                Em modo consulta pode ver a lista de membros; adicionar ou remover gestores e CS não está disponível para o perfil admin geral.
+              </p>
+            )}
           </div>
         ) : null}
 

@@ -180,7 +180,7 @@ export default function UsuarioContaAdminPage() {
 
       const row = data as PerfilRow;
 
-      if (scope.kind === "global_admin") {
+      if (scope.kind === "global_admin" || scope.kind === "admin_geral") {
         setPerfilRow(row);
       } else if (scope.kind === "equipe_admin" && scope.equipeId) {
         const sameEquipe = (row.equipe_id ?? "") === scope.equipeId;

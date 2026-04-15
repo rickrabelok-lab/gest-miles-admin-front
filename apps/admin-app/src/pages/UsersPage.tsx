@@ -35,7 +35,10 @@ const ROLE_OPTION_LABEL: Record<string, string> = {
   admin: "Admin global do painel (admin)",
 };
 
-function roleOptionsForEdit(scopeKind: "global_admin" | "equipe_admin" | undefined | null, currentRole: string): Perfil["role"][] {
+function roleOptionsForEdit(
+  scopeKind: "global_admin" | "equipe_admin" | "admin_geral" | undefined | null,
+  currentRole: string,
+): Perfil["role"][] {
   const base: Perfil["role"][] = ["cliente", "cliente_gestao", "gestor", "cs", "admin_equipe"];
   const list = scopeKind === "global_admin" ? [...base, "admin" as Perfil["role"]] : base;
   const cur = String(currentRole).trim();

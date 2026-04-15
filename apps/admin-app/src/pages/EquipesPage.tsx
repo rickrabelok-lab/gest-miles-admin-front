@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { useAccessScope } from "@/hooks/useAccessScope";
-import { canManageEquipesGlobally } from "@/lib/accessScope";
+import { canManageEquipesGlobally, canViewGlobalEquipesList } from "@/lib/accessScope";
 import {
   createEquipe,
   formatSupabaseError,
@@ -156,7 +156,8 @@ const COLOR_PRESETS = [
 export default function EquipesPage() {
   const navigate = useNavigate();
   const { scope } = useAccessScope();
-  const allowGlobalEquipes = canManageEquipesGlobally(scope);
+  const canViewEquipes = canViewGlobalEquipesList(scope);
+  const canManageEquipes = canManageEquipesGlobally(scope);
   const [equipes, setEquipes] = useState<Equipe[]>([]);
   const [rows, setRows] = useState<EquipeListRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -206,12 +207,12 @@ export default function EquipesPage() {
   }, []);
 
   useEffect(() => {
-    if (!allowGlobalEquipes) {
+    if (!canViewEquipes) {
       setLoading(false);
       return;
     }
     void load();
-  }, [allowGlobalEquipes, load]);
+  }, [canViewEquipes, load]);
 
   const kpis = useMemo(() => {
     const totalEquipes = equipes.length;
@@ -238,15 +239,15 @@ export default function EquipesPage() {
     return COLOR_PRESETS[h] ?? COLOR_PRESETS[0]!;
   };
 
-  if (!allowGlobalEquipes) {
+  if (!canViewEquipes) {
     return (
       <div className="table-card" style={{ maxWidth: 560 }}>
         <div className="tc-header">
           <div className="tc-title">Equipes</div>
         </div>
         <p style={{ fontSize: 13, color: "var(--t2)", padding: "16px 20px 20px", lineHeight: 1.55, margin: 0 }}>
-          A gestão global de equipes está reservada ao <strong>administrador global</strong>. O seu perfil trabalha apenas dentro da gestão à qual está
-          associado.
+          A listagem global de equipes não está disponível para o seu perfil (âmbito de equipe). Perfis{" "}
+          <strong>administrador global</strong>, <strong>admin master</strong> ou <strong>admin geral</strong> (consulta) acedem a esta vista.
         </p>
       </div>
     );
@@ -263,16 +264,40 @@ export default function EquipesPage() {
             Gerencie grupos de gestão, membros e permissões
           </p>
         </div>
-        <button type="button" className="btn-primary" onClick={() => setModalOpen(true)}>
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" aria-hidden>
-            <line x1="6.5" y1="1" x2="6.5" y2="12" />
-            <line x1="1" y1="6.5" x2="12" y2="6.5" />
-          </svg>
-          Nova equipe
-        </button>
+        {canManageEquipes ? (
+          <button type="button" className="btn-primary" onClick={() => setModalOpen(true)}>
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" aria-hidden>
+              <line x1="6.5" y1="1" x2="6.5" y2="12" />
+              <line x1="1" y1="6.5" x2="12" y2="6.5" />
+            </svg>
+            Nova equipe
+          </button>
+        ) : null}
       </div>
 
       {error ? <p style={{ fontSize: 13, color: "var(--err)" }}>{error}</p> : null}
+      {!loading && !error && rows.length === 0 ? (
+        <p
+          style={{
+            fontSize: 12,
+            color: "var(--t2)",
+            margin: 0,
+            padding: "10px 14px",
+            background: "#FFF8E6",
+            border: "1px solid #F5E0A8",
+            borderRadius: 10,
+            lineHeight: 1.5,
+            maxWidth: 720,
+          }}
+        >
+          <strong>Nenhuma equipa visível com esta sessão.</strong> Se na base de dados existem linhas em{" "}
+          <code style={{ fontSize: 11 }}>public.equipes</code> (ex.: equipa do João Carvalho) e aqui aparece tudo a zero, o mais provável são{" "}
+          <strong>políticas RLS</strong> em <code style={{ fontSize: 11 }}>equipes</code> que não incluem o teu{" "}
+          <code style={{ fontSize: 11 }}>perfis.role</code>. No Supabase SQL Editor executa o patch do repositório{" "}
+          <code style={{ fontSize: 11 }}>apps/admin-app/sql/patch-equipes-rls-select-admin-panel.sql</code> e confirma também{" "}
+          <code style={{ fontSize: 11 }}>patch-is-legacy-platform-admin-admin-master.sql</code> se usas <code style={{ fontSize: 11 }}>admin_master</code>.
+        </p>
+      ) : null}
 
       <div className="kpi-grid" style={{ marginBottom: 0 }}>
         <div className="kpi-card purple">
@@ -413,13 +438,15 @@ export default function EquipesPage() {
                               <line x1="5.5" y1="3.5" x2="5.5" y2="5.5" />
                               <circle cx="5.5" cy="7.5" r=".5" fill="currentColor" />
                             </svg>
-                            Gerenciar
+                            {canManageEquipes ? "Gerenciar" : "Ver"}
                           </Link>
-                          <button type="button" className="ic-btn" title="Editar" aria-label="Editar" onClick={() => navigate(href)}>
-                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                              <path d="M8.5 1.5L10.5 3.5 4 10H2V8L8.5 1.5Z" />
-                            </svg>
-                          </button>
+                          {canManageEquipes ? (
+                            <button type="button" className="ic-btn" title="Editar" aria-label="Editar" onClick={() => navigate(href)}>
+                              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                                <path d="M8.5 1.5L10.5 3.5 4 10H2V8L8.5 1.5Z" />
+                              </svg>
+                            </button>
+                          ) : null}
                           <button type="button" className="ic-btn danger" title="Desativar" aria-label="Desativar" disabled>
                             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                               <circle cx="6" cy="6" r="5" />
@@ -440,13 +467,15 @@ export default function EquipesPage() {
           <span style={{ fontSize: 12, color: "var(--t3)" }}>
             Mostrando {filteredRows.length} de {rows.length} equipe{rows.length === 1 ? "" : "s"}
           </span>
-          <button type="button" className="eq-footer-link" onClick={() => setModalOpen(true)}>
-            + Nova equipe →
-          </button>
+          {canManageEquipes ? (
+            <button type="button" className="eq-footer-link" onClick={() => setModalOpen(true)}>
+              + Nova equipe →
+            </button>
+          ) : null}
         </div>
       </div>
 
-      {modalOpen ? (
+      {modalOpen && canManageEquipes ? (
         <div className="eq-modal-overlay" role="presentation" onClick={() => !pending && setModalOpen(false)}>
           <div
             className="eq-modal"

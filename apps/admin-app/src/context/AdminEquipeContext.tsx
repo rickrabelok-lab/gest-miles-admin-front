@@ -9,7 +9,7 @@ import {
 } from "react";
 
 import { useAdminAuth } from "@/context/AdminAuthContext";
-import { isAdminPanelRole } from "@/lib/accessScope";
+import { isAdminMasterRole, isAdminPanelRole } from "@/lib/accessScope";
 import { supabase } from "@/lib/supabase";
 
 export type Equipe = { id: string; nome: string; parent_id: string | null };
@@ -49,7 +49,7 @@ export function AdminEquipeProvider({ children }: PropsWithChildren) {
   const equipeSelectionLocked = Boolean(
     !authRoleLoading &&
       isAdminPanelRole(role) &&
-      role !== "admin_master" &&
+      !isAdminMasterRole(role) &&
       authEquipeId != null &&
       String(authEquipeId).trim() !== "",
   );

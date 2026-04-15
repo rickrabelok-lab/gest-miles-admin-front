@@ -1206,7 +1206,9 @@ export async function evaluateAdminSubscriptionBlock(params: {
   const r = String(params.role ?? "")
     .trim()
     .toLowerCase();
-  if (r !== "admin" && r !== "admin_master") return { blocked: false };
+  if (r !== "admin" && r !== "admin_master" && r !== "admin_geral") return { blocked: false };
+  /** Admin master e admin geral não ficam bloqueados pelo gate de assinatura de uma equipe. */
+  if (r === "admin_master" || r === "admin_geral") return { blocked: false };
   if (!params.equipeId || String(params.equipeId).trim() === "") return { blocked: false };
 
   const { data, error } = await supabase

@@ -43,7 +43,8 @@ export default function LoginPage() {
           <CardHeader>
             <CardTitle>Acesso não autorizado</CardTitle>
             <CardDescription>
-              Este painel é exclusivo para utilizadores com <strong>role admin ou admin_master</strong>. O seu perfil
+              Este painel é exclusivo para utilizadores com{" "}
+              <strong>role admin, admin_master ou admin_geral</strong>. O seu perfil
               atual:{" "}
               <strong>{role ?? "—"}</strong>.
             </CardDescription>
