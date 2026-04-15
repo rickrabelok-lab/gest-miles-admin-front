@@ -8,6 +8,7 @@ import { useAdminEquipe } from "@/context/AdminEquipeContext";
 import { useAccessScope } from "@/hooks/useAccessScope";
 import { canAccessAppConfig, canAccessSecurityDashboard } from "@/lib/accessScope";
 import { countB2cClientesSemEquipe } from "@/lib/adminApi";
+import { countBetaFlagsInStorage } from "@/services/adminFeatureFlagsStore";
 import { cn } from "@/lib/utils";
 
 const NONE = "__none__";
@@ -19,7 +20,7 @@ const ROUTE_TITLES: { prefix: string; title: string }[] = [
   { prefix: "/insights", title: "Insights" },
   { prefix: "/equipes", title: "Equipes de Gestão" },
   { prefix: "/users", title: "Usuários" },
-  { prefix: "/clients", title: "Usuários GestMiles" },
+  { prefix: "/clients", title: "Usuários B2C" },
   { prefix: "/gestores", title: "Gestores" },
   { prefix: "/viagens-geral", title: "Viagens Geral" },
   { prefix: "/viagens", title: "Viagens por Gestão" },
@@ -27,7 +28,11 @@ const ROUTE_TITLES: { prefix: string; title: string }[] = [
   { prefix: "/seguranca", title: "Segurança" },
   { prefix: "/configuracoes", title: "Configurações" },
   { prefix: "/assinaturas", title: "Assinaturas & Receita" },
+  { prefix: "/planos", title: "Planos & Preços" },
+  { prefix: "/cupons", title: "Cupons & Promoções" },
   { prefix: "/monetizacao", title: "Monetização Stripe" },
+  { prefix: "/feature-flags", title: "Feature Flags" },
+  { prefix: "/comunicacoes", title: "Comunicações" },
   { prefix: "/logs", title: "Logs" },
 ];
 
@@ -108,6 +113,24 @@ function NavIconCard({ className }: { className?: string }) {
   );
 }
 
+function NavIconTag({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+      <path d="M2 8V3a1 1 0 0 1 1-1h5l7 7-5 5-7-7z" />
+      <circle cx="5.5" cy="5.5" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function NavIconCoupon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+      <path d="M2 8h12M2 8l3-5M2 8l3 5M14 8l-3-5M14 8l-3 5" />
+      <circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 function NavIconSettings({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
@@ -144,6 +167,27 @@ function NavIconFile({ className }: { className?: string }) {
   );
 }
 
+function NavIconFlags({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+      <rect x="2" y="3" width="5" height="5" rx="1" />
+      <rect x="9" y="3" width="5" height="5" rx="1" />
+      <rect x="2" y="10" width="5" height="3" rx="1" />
+      <rect x="9" y="10" width="5" height="3" rx="1" />
+    </svg>
+  );
+}
+
+function NavIconChat({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+      <path d="M14 2H2v8h3l1 3 1-3h7V2Z" />
+      <line x1="5" y1="6" x2="11" y2="6" />
+      <line x1="5" y1="9" x2="8" y2="9" />
+    </svg>
+  );
+}
+
 type NavEntry = {
   to: string;
   label: string;
@@ -171,7 +215,16 @@ const NAV_GROUPS: { label: string; items: NavEntry[] }[] = [
     label: "Financeiro",
     items: [
       { to: "/assinaturas", label: "Assinaturas", Icon: NavIconLock, badge: { text: "8", kind: "warn" } },
+      { to: "/planos", label: "Planos & Preços", Icon: NavIconTag },
+      { to: "/cupons", label: "Cupons & Promoções", Icon: NavIconCoupon },
       { to: "/monetizacao", label: "Monetização Stripe", Icon: NavIconCard },
+    ],
+  },
+  {
+    label: "Produto",
+    items: [
+      { to: "/feature-flags", label: "Feature Flags", Icon: NavIconFlags, badge: { text: "0 beta", kind: "warn" } },
+      { to: "/comunicacoes", label: "Comunicações", Icon: NavIconChat },
     ],
   },
   {
@@ -190,6 +243,7 @@ export default function AdminAppLayout() {
   const navigate = useNavigate();
   const { signOut, perfilNome, role, user } = useAdminAuth();
   const [b2cClienteBadge, setB2cClienteBadge] = useState<number | "loading" | "error">("loading");
+  const [ffBetaCount, setFfBetaCount] = useState(() => countBetaFlagsInStorage());
   const {
     equipesGrupoGestaoRaiz,
     selectedEquipeId,
@@ -226,6 +280,12 @@ export default function AdminAppLayout() {
       window.removeEventListener("gm:admin-b2c-clientes-updated", onListaB2cAtualizada);
     };
   }, [user?.id, pathname]);
+
+  useEffect(() => {
+    const fn = () => setFfBetaCount(countBetaFlagsInStorage());
+    window.addEventListener("gm-feature-flags-changed", fn);
+    return () => window.removeEventListener("gm-feature-flags-changed", fn);
+  }, []);
 
   const equipeDetalheId = useMemo(() => pathname.match(/^\/equipes\/([^/]+)$/)?.[1] ?? null, [pathname]);
 
@@ -369,10 +429,14 @@ export default function AdminAppLayout() {
             <div key={group.label} className="sb-group">
               <div className="sb-group-label">{group.label}</div>
               {group.items.map((item) => {
-                const active = item.end ? pathname === item.to : pathname === item.to || pathname.startsWith(`${item.to}/`);
                 const Icon = item.Icon;
                 return (
-                  <NavLink key={item.to} to={item.to} end={item.end} className={cn("sb-item", active && "active")}>
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.end}
+                    className={({ isActive }) => cn("sb-item", isActive && "active")}
+                  >
                     <Icon className="sb-icon" />
                     {item.label}
                     {item.badge ? (
@@ -386,11 +450,13 @@ export default function AdminAppLayout() {
                         {item.to === "/equipes"
                           ? String(equipesGrupoGestaoRaiz.length)
                           : item.to === "/clients"
-                            ? b2cClienteBadge === "loading"
-                              ? "…"
-                              : b2cClienteBadge === "error"
-                                ? "—"
-                                : String(b2cClienteBadge)
+                          ? b2cClienteBadge === "loading"
+                            ? "…"
+                            : b2cClienteBadge === "error"
+                              ? "—"
+                              : String(b2cClienteBadge)
+                          : item.to === "/feature-flags"
+                            ? `${ffBetaCount} beta`
                             : item.badge.text}
                       </span>
                     ) : null}

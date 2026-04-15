@@ -1,9 +1,23 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { formatDistanceToNow } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 import { useAdminEquipe } from "@/context/AdminEquipeContext";
 import { useAccessScope } from "@/hooks/useAccessScope";
-import { formatSupabaseError, listEquipes, listPerfis } from "@/lib/adminApi";
+import {
+  countLogsAcoesSince,
+  countLogsErrosSince,
+  formatSupabaseError,
+  listAuditLogs,
+  listEquipes,
+  listPerfis,
+  readOperationalUptime30d,
+  readOperationalUptimeWindowHours,
+  runOperationalHealthCheck,
+  type LogAcaoRow,
+  type OperationalHealthResult,
+} from "@/lib/adminApi";
 import { supabase } from "@/lib/supabase";
 import {
   computeDashboardKpisEscopoFromPerfis,
@@ -13,6 +27,37 @@ import {
 import { listSubscriptionsAdmin } from "@/services/subscriptionsAdmin";
 
 const PREVIEW_EQUIPES_NA_TABELA = 8;
+
+const pctPt = (n: number, fraction = 1) =>
+  new Intl.NumberFormat("pt-BR", { minimumFractionDigits: fraction, maximumFractionDigits: fraction }).format(n);
+
+/** Proxy 0–100% sem API de tamanho real da BD (volume de perfis + equipes). */
+function estimateDbCapacityProxy(perfis: number, equipes: number): number {
+  const score = perfis + equipes * 12;
+  return Math.min(100, Math.max(4, Math.round(100 * (1 - Math.exp(-score / 3500)))));
+}
+
+type ActivityKind = "ok" | "warn" | "purple" | "neutral";
+
+function describeAuditActivity(log: LogAcaoRow): { kind: ActivityKind; line: ReactNode } {
+  const tipo = (log.tipo_acao ?? "—").trim();
+  const ent = (log.entidade_afetada ?? "—").trim();
+  const hay = `${tipo} ${ent}`.toLowerCase();
+
+  if (hay.includes("erro") || hay.includes("error") || hay.includes("falha") || hay.includes("fail")) {
+    return { kind: "warn", line: <><strong>Erro / falha</strong> · {tipo}</> };
+  }
+  if (hay.includes("login") || hay.includes("sign_in") || hay.includes("signin") || hay.includes("sessão") || hay.includes("sessao")) {
+    return { kind: "ok", line: <><strong>Sessão</strong> · {tipo}</> };
+  }
+  if (hay.includes("assinatura") || hay.includes("subscription") || hay.includes("stripe") || hay.includes("pagamento")) {
+    return { kind: "purple", line: <><strong>Faturação / assinatura</strong> · {tipo}</> };
+  }
+  if (hay.includes("gestor") || hay.includes("perfil") || hay.includes("equipe") || hay.includes("usuario") || hay.includes("utilizador")) {
+    return { kind: "neutral", line: <><strong>Equipe ou utilizador</strong> · {tipo} · {ent}</> };
+  }
+  return { kind: "neutral", line: <><strong>{tipo || "Evento"}</strong> · {ent}</> };
+}
 
 export default function DashboardPage() {
   const location = useLocation();
@@ -27,6 +72,10 @@ export default function DashboardPage() {
   const [contagemPorEquipe, setContagemPorEquipe] = useState<ReturnType<typeof computeEquipeRoleCountsByEquipeId> | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [health, setHealth] = useState<OperationalHealthResult | null>(null);
+  const [errors24h, setErrors24h] = useState<number | null>(null);
+  const [acoes24h, setAcoes24h] = useState<number | null>(null);
+  const [activityLogs, setActivityLogs] = useState<LogAcaoRow[]>([]);
 
   const equipeNome = selectedEquipeId ? equipes.find((e) => e.id === selectedEquipeId)?.nome : null;
   /** KPIs por equipe só fazem sentido com uma equipe escolhida no filtro. */
@@ -39,12 +88,17 @@ export default function DashboardPage() {
       setLoading(true);
       setErr(null);
       try {
-        const [p, e, subRes, perfisAll, equipesList] = await Promise.all([
+        const since24h = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+        const [p, e, subRes, perfisAll, equipesList, healthRes, errN, acaoN, logsRecent] = await Promise.all([
           supabase.from("perfis").select("usuario_id", { count: "exact", head: true }),
           supabase.from("equipes").select("id", { count: "exact", head: true }),
           listSubscriptionsAdmin().catch(() => ({ rows: [], available: false as const })),
           listPerfis(),
           listEquipes(),
+          runOperationalHealthCheck().catch(() => null),
+          countLogsErrosSince(since24h).catch(() => 0),
+          countLogsAcoesSince(since24h).catch(() => 0),
+          listAuditLogs(12).catch(() => [] as LogAcaoRow[]),
         ]);
         if (p.error) throw p.error;
         if (e.error) throw e.error;
@@ -57,8 +111,16 @@ export default function DashboardPage() {
           globais: { perfis: p.count ?? 0, equipes: e.count ?? 0 },
           subs: { active, expired, available: subRes.available },
         });
+        setHealth(healthRes);
+        setErrors24h(errN);
+        setAcoes24h(acaoN);
+        setActivityLogs(logsRecent);
       } catch (e) {
         setContagemPorEquipe(null);
+        setHealth(null);
+        setErrors24h(null);
+        setAcoes24h(null);
+        setActivityLogs([]);
         setErr(formatSupabaseError(e));
       } finally {
         setLoading(false);
@@ -87,7 +149,27 @@ export default function DashboardPage() {
   const globU = kpis.globais?.perfis ?? 0;
   const globE = kpis.globais?.equipes ?? 0;
   const subsA = kpis.subs?.active ?? 0;
-  const errLogs = 3;
+  const errLogs = errors24h ?? 0;
+
+  const uptimeInfo = useMemo(() => {
+    const w24 = readOperationalUptimeWindowHours(24);
+    if (w24.samples >= 3) return { pct: w24.pct, hint: "últ. 24h · verificações neste browser" };
+    const w30 = readOperationalUptime30d();
+    return { pct: w30.pct, hint: "últ. 30d · verificações neste browser" };
+  }, [health?.checkedAt]);
+
+  const taxaErroPct = useMemo(() => {
+    if (acoes24h == null || errors24h == null) return null;
+    if (acoes24h === 0) return errors24h > 0 ? 100 : 0;
+    return Math.min(100, (errors24h / acoes24h) * 100);
+  }, [errors24h, acoes24h]);
+
+  const latenciaMs = health?.latenciaMediaSupabaseMs ?? health?.latenciaDbMs ?? null;
+
+  const capacityPct = useMemo(
+    () => estimateDbCapacityProxy(kpis.globais?.perfis ?? 0, kpis.globais?.equipes ?? 0),
+    [kpis.globais?.perfis, kpis.globais?.equipes],
+  );
 
   return (
     <>
@@ -210,12 +292,12 @@ export default function DashboardPage() {
               <div className="kpi-delta delta-up">↑ +2 este mês</div>
             </div>
             <div className="kpi-card red">
-              <div className="kpi-label">Erros nos logs</div>
+              <div className="kpi-label">Erros registados</div>
               <div className="kpi-value" style={{ color: "var(--err)" }}>
-                {errLogs}
+                {loading || errors24h == null ? "—" : errLogs}
               </div>
-              <div className="kpi-sub">últimas 24h</div>
-              <div className="kpi-delta delta-dn">↑ Atenção necessária</div>
+              <div className="kpi-sub">tabela logs_erros · 24h</div>
+              <div className={`kpi-delta ${errLogs > 0 ? "delta-dn" : "delta-up"}`}>{errLogs > 0 ? "↗ Requer análise" : "✓ Nenhum erro"}</div>
             </div>
           </div>
         </>
@@ -358,30 +440,47 @@ export default function DashboardPage() {
         <div className="side-stats">
           <div className="side-stat-card">
             <div className="side-stat-title">Saúde do sistema</div>
+            <p style={{ fontSize: 10, color: "var(--t3)", margin: "0 0 8px", lineHeight: 1.35 }}>{uptimeInfo.hint}</p>
             <div className="mini-stat">
               <span className="mini-stat-label">Uptime</span>
-              <span className="mini-stat-value" style={{ color: "var(--ok)" }}>
-                99,9%
+              <span className="mini-stat-value" style={{ color: "var(--ok)" }} title={uptimeInfo.hint}>
+                {loading ? "—" : `${pctPt(uptimeInfo.pct, 1)}%`}
               </span>
             </div>
             <div className="mini-stat">
-              <span className="mini-stat-label">Capacidade BD</span>
+              <span className="mini-stat-label" title="Estimativa pelo volume de perfis e equipes (sem medida de disco da BD)">
+                Capacidade BD
+              </span>
               <div style={{ flex: 1, margin: "0 12px" }}>
                 <div className="progress-bar">
-                  <div className="progress-fill" style={{ width: "34%" }} />
+                  <div className="progress-fill" style={{ width: `${loading ? 0 : capacityPct}%` }} />
                 </div>
               </div>
-              <span className="mini-stat-value">34%</span>
+              <span className="mini-stat-value">{loading ? "—" : `${Math.round(capacityPct)}%`}</span>
             </div>
             <div className="mini-stat">
-              <span className="mini-stat-label">Taxa de erro (24h)</span>
-              <span className="mini-stat-value" style={{ color: "var(--warn)" }}>
-                0.3%
+              <span className="mini-stat-label" title="logs_erros ÷ logs_acoes nas últimas 24h (proxy)">
+                Taxa de erro (24h)
+              </span>
+              <span
+                className="mini-stat-value"
+                style={{
+                  color:
+                    taxaErroPct == null
+                      ? undefined
+                      : taxaErroPct === 0
+                        ? "var(--ok)"
+                        : taxaErroPct > 1
+                          ? "var(--err)"
+                          : "var(--warn)",
+                }}
+              >
+                {loading || taxaErroPct == null ? "—" : `${pctPt(taxaErroPct, taxaErroPct < 10 ? 2 : 1)}%`}
               </span>
             </div>
             <div className="mini-stat">
               <span className="mini-stat-label">Latência média</span>
-              <span className="mini-stat-value">124ms</span>
+              <span className="mini-stat-value">{loading || latenciaMs == null ? "—" : `${latenciaMs}ms`}</span>
             </div>
           </div>
 
@@ -402,63 +501,63 @@ export default function DashboardPage() {
               </Link>
             </div>
 
-            <div className="act-item">
-              <div className="act-icon-wrap" style={{ background: "var(--ok-bg)" }}>
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#16A34A" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
-                  <circle cx="6" cy="4" r="2.5" />
-                  <path d="M1 11c0-2.5 2.2-4 5-4s5 1.5 5 4" />
-                </svg>
+            {loading ? (
+              <div style={{ padding: "14px 16px", fontSize: 12, color: "var(--t3)" }}>A carregar actividade…</div>
+            ) : activityLogs.length === 0 ? (
+              <div style={{ padding: "14px 16px", fontSize: 12, color: "var(--t3)", lineHeight: 1.45 }}>
+                Sem eventos em <code style={{ fontSize: 11 }}>logs_acoes</code> ou sem permissão de leitura.
               </div>
-              <div>
-                <div className="act-msg">
-                  <strong>Novo usuário</strong> registrado na equipe
-                </div>
-                <div className="act-time">há 12 minutos</div>
-              </div>
-            </div>
-            <div className="act-item">
-              <div className="act-icon-wrap" style={{ background: "var(--ps)" }}>
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#8A05BE" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
-                  <rect x="1" y="2.5" width="10" height="7" rx="1.5" />
-                  <line x1="1" y1="5" x2="11" y2="5" />
-                </svg>
-              </div>
-              <div>
-                <div className="act-msg">
-                  Assinatura <strong>Pro Plan</strong> ativada
-                </div>
-                <div className="act-time">há 1 hora</div>
-              </div>
-            </div>
-            <div className="act-item">
-              <div className="act-icon-wrap" style={{ background: "var(--warn-bg)" }}>
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#D97706" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
-                  <path d="M6 1L1 10.5h10L6 1Z" />
-                  <line x1="6" y1="5" x2="6" y2="7.5" />
-                  <circle cx="6" cy="9" r=".5" fill="#D97706" />
-                </svg>
-              </div>
-              <div>
-                <div className="act-msg">
-                  <strong>Aviso</strong> no módulo de Logs
-                </div>
-                <div className="act-time">há 3 horas</div>
-              </div>
-            </div>
-            <div className="act-item">
-              <div className="act-icon-wrap" style={{ background: "#F0F0F0" }}>
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#6B6B6B" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
-                  <circle cx="6" cy="4.5" r="2.5" />
-                  <path d="M1 11c0-2.5 2.2-4 5-4s5 1.5 5 4" />
-                </svg>
-              </div>
-              <div>
-                <div className="act-msg">
-                  Gestor <strong>adicionado</strong> à equipe
-                </div>
-                <div className="act-time">ontem</div>
-              </div>
-            </div>
+            ) : (
+              activityLogs.map((log) => {
+                const { kind, line } = describeAuditActivity(log);
+                const when = log.created_at
+                  ? formatDistanceToNow(new Date(log.created_at), { addSuffix: true, locale: ptBR })
+                  : "—";
+                const wrapBg =
+                  kind === "ok"
+                    ? "var(--ok-bg)"
+                    : kind === "warn"
+                      ? "var(--warn-bg)"
+                      : kind === "purple"
+                        ? "var(--ps)"
+                        : "#F0F0F0";
+                const stroke =
+                  kind === "ok"
+                    ? "#16A34A"
+                    : kind === "warn"
+                      ? "#D97706"
+                      : kind === "purple"
+                        ? "#8A05BE"
+                        : "#6B6B6B";
+                return (
+                  <div key={log.id} className="act-item">
+                    <div className="act-icon-wrap" style={{ background: wrapBg }}>
+                      {kind === "warn" ? (
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke={stroke} strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+                          <path d="M6 1L1 10.5h10L6 1Z" />
+                          <line x1="6" y1="5" x2="6" y2="7.5" />
+                          <circle cx="6" cy="9" r=".5" fill={stroke} />
+                        </svg>
+                      ) : kind === "purple" ? (
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke={stroke} strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+                          <rect x="1" y="2.5" width="10" height="7" rx="1.5" />
+                          <line x1="1" y1="5" x2="11" y2="5" />
+                        </svg>
+                      ) : (
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke={stroke} strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+                          <circle cx="6" cy="4.5" r="2.5" />
+                          <path d="M1 11c0-2.5 2.2-4 5-4s5 1.5 5 4" />
+                        </svg>
+                      )}
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="act-msg">{line}</div>
+                      <div className="act-time">{when}</div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
 
           <div className="side-stat-card">
@@ -506,15 +605,15 @@ export default function DashboardPage() {
                 <span
                   style={{
                     marginLeft: "auto",
-                    background: "var(--err-bg)",
-                    color: "var(--err)",
+                    background: errLogs > 0 ? "var(--err-bg)" : "var(--ok-bg)",
+                    color: errLogs > 0 ? "var(--err)" : "var(--ok)",
                     fontSize: 9.5,
                     fontWeight: 700,
                     padding: "1px 6px",
                     borderRadius: 20,
                   }}
                 >
-                  3
+                  {loading || errors24h == null ? "—" : errLogs}
                 </span>
               </Link>
             </div>

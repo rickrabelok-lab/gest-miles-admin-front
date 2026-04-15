@@ -6,6 +6,7 @@ export type Perfil = {
   nome_completo: string | null;
   role: "admin" | "admin_equipe" | "cs" | "gestor" | "cliente" | "cliente_gestao" | string;
   equipe_id: string | null;
+  created_at?: string | null;
 };
 
 export type Equipe = { id: string; nome: string; parent_id: string | null; created_at?: string | null };
@@ -329,6 +330,53 @@ export async function listAuditLogsForAnalytics(maxRows = 6000): Promise<LogAcao
     if (chunk.length < pageSize) break;
   }
   return out.slice(0, maxRows);
+}
+
+/** Paginação + total (para a página Logs sem `VITE_API_URL`). */
+export async function listAuditLogsPaginated(params: {
+  limit: number;
+  offset: number;
+  tabela?: string;
+  acao?: string;
+  user_id?: string;
+  from?: string;
+  to?: string;
+}): Promise<{ logs: LogAcaoRow[]; total: number }> {
+  let q = supabase
+    .from("logs_acoes")
+    .select("id, user_id, tipo_acao, entidade_afetada, entidade_id, details, created_at", { count: "exact" });
+  if (params.tabela?.trim()) q = q.eq("entidade_afetada", params.tabela.trim());
+  if (params.acao?.trim()) q = q.eq("tipo_acao", params.acao.trim());
+  if (params.user_id?.trim()) q = q.eq("user_id", params.user_id.trim());
+  if (params.from) q = q.gte("created_at", `${params.from}T00:00:00.000Z`);
+  if (params.to) q = q.lte("created_at", `${params.to}T23:59:59.999Z`);
+  const { data, error, count } = await q
+    .order("created_at", { ascending: false })
+    .range(params.offset, params.offset + params.limit - 1);
+  if (error) {
+    if (isMissingRelationError(error)) return { logs: [], total: 0 };
+    throw error;
+  }
+  return { logs: (data ?? []) as LogAcaoRow[], total: count ?? 0 };
+}
+
+/** Valores distintos de `entidade_afetada` (amostra recente) para filtros da UI. */
+export async function listDistinctEntidadesAfetadasAudit(sampleLimit = 4000): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("logs_acoes")
+    .select("entidade_afetada")
+    .order("created_at", { ascending: false })
+    .limit(sampleLimit);
+  if (error) {
+    if (isMissingRelationError(error)) return [];
+    throw error;
+  }
+  const set = new Set<string>();
+  for (const r of data ?? []) {
+    const e = (r as { entidade_afetada?: string | null }).entidade_afetada;
+    if (e != null && String(e).trim()) set.add(String(e).trim());
+  }
+  return [...set].sort((a, b) => a.localeCompare(b, "pt-BR"));
 }
 
 export type PerfilInsightRow = {
@@ -711,14 +759,87 @@ export type OperationalHealthResult = {
   sistemaOnline: boolean;
   supabaseOk: boolean;
   supabaseMessage?: string;
+  /** Latências medidas no browser (ms). */
+  latenciaDbMs: number | null;
+  latenciaAuthMs: number | null;
+  latenciaStorageMs: number | null;
+  latenciaStripeMs: number | null;
+  stripeChaveConfigurada: boolean;
+  latenciaEdgeMs: number | null;
+  /** Média simples das latências Supabase (DB, Auth, Storage). */
+  latenciaMediaSupabaseMs: number | null;
   externasOk: boolean | null;
   externasDetalhes: { url: string; ok: boolean; error?: string }[];
 };
+
+const HEALTH_PING_LOG_KEY = "gm-admin-health-pings";
+
+function recordOperationalPing(ok: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = window.localStorage.getItem(HEALTH_PING_LOG_KEY);
+    const arr = raw ? (JSON.parse(raw) as { at: string; ok: boolean }[]) : [];
+    arr.push({ at: new Date().toISOString(), ok });
+    const cutoff = Date.now() - 30 * 86400000;
+    const trimmed = arr.filter((x) => new Date(x.at).getTime() > cutoff).slice(-2500);
+    window.localStorage.setItem(HEALTH_PING_LOG_KEY, JSON.stringify(trimmed));
+  } catch {
+    /* noop */
+  }
+}
+
+/** Uptime estimado a partir dos pings guardados em `localStorage` (últimos 30 dias). */
+export function readOperationalUptime30d(): { pct: number; downtimeMinutes: number } {
+  if (typeof window === "undefined") return { pct: 99.9, downtimeMinutes: 0 };
+  try {
+    const raw = window.localStorage.getItem(HEALTH_PING_LOG_KEY);
+    const arr: { at: string; ok: boolean }[] = raw ? JSON.parse(raw) : [];
+    const cutoff = Date.now() - 30 * 86400000;
+    const recent = arr.filter((x) => new Date(x.at).getTime() > cutoff);
+    if (recent.length === 0) return { pct: 99.9, downtimeMinutes: 0 };
+    const okN = recent.filter((x) => x.ok).length;
+    const pct = (okN / recent.length) * 100;
+    const downtimeMinutes = Math.round(((100 - Math.min(pct, 100)) / 100) * 30 * 24 * 60);
+    return { pct: Math.round(pct * 10) / 10, downtimeMinutes };
+  } catch {
+    return { pct: 99.9, downtimeMinutes: 0 };
+  }
+}
+
+/** Uptime a partir dos pings em `localStorage` numa janela recente (horas). */
+export function readOperationalUptimeWindowHours(hours: number): { pct: number; samples: number } {
+  if (typeof window === "undefined" || hours <= 0) return { pct: 100, samples: 0 };
+  try {
+    const raw = window.localStorage.getItem(HEALTH_PING_LOG_KEY);
+    const arr: { at: string; ok: boolean }[] = raw ? JSON.parse(raw) : [];
+    const cutoff = Date.now() - hours * 3600000;
+    const recent = arr.filter((x) => new Date(x.at).getTime() > cutoff);
+    if (recent.length === 0) return { pct: 100, samples: 0 };
+    const okN = recent.filter((x) => x.ok).length;
+    return { pct: Math.round((okN / recent.length) * 1000) / 10, samples: recent.length };
+  } catch {
+    return { pct: 100, samples: 0 };
+  }
+}
+
+async function measureMs(fn: () => Promise<unknown>): Promise<{ ms: number | null; ok: boolean }> {
+  const t0 = globalThis.performance.now();
+  try {
+    await fn();
+    const ms = Math.max(1, Math.round(globalThis.performance.now() - t0));
+    return { ms, ok: true };
+  } catch {
+    const ms = Math.max(1, Math.round(globalThis.performance.now() - t0));
+    return { ms, ok: false };
+  }
+}
 
 export async function listLogsErros(filter?: {
   origem?: LogErroOrigem | "" | null;
   fromDate?: string | null;
   toDate?: string | null;
+  /** ISO-8601 — substitui o início do dia de `fromDate` quando definido. */
+  fromDateTime?: string | null;
   limit?: number;
 }): Promise<LogErroRow[]> {
   let q = supabase
@@ -727,7 +848,11 @@ export async function listLogsErros(filter?: {
     .order("created_at", { ascending: false })
     .limit(filter?.limit ?? 200);
   if (filter?.origem) q = q.eq("origem", filter.origem);
-  if (filter?.fromDate) q = q.gte("created_at", `${filter.fromDate}T00:00:00.000Z`);
+  if (filter?.fromDateTime) {
+    q = q.gte("created_at", filter.fromDateTime);
+  } else if (filter?.fromDate) {
+    q = q.gte("created_at", `${filter.fromDate}T00:00:00.000Z`);
+  }
   if (filter?.toDate) q = q.lte("created_at", `${filter.toDate}T23:59:59.999Z`);
   const { data, error } = await q;
   if (error) {
@@ -735,6 +860,30 @@ export async function listLogsErros(filter?: {
     throw error;
   }
   return (data ?? []) as LogErroRow[];
+}
+
+export async function countLogsErrosSince(sinceIso: string): Promise<number> {
+  const { count, error } = await supabase
+    .from("logs_erros")
+    .select("id", { count: "exact", head: true })
+    .gte("created_at", sinceIso);
+  if (error) {
+    if (isMissingRelationError(error)) return 0;
+    throw error;
+  }
+  return count ?? 0;
+}
+
+export async function countLogsAcoesSince(sinceIso: string): Promise<number> {
+  const { count, error } = await supabase
+    .from("logs_acoes")
+    .select("id", { count: "exact", head: true })
+    .gte("created_at", sinceIso);
+  if (error) {
+    if (isMissingRelationError(error)) return 0;
+    throw error;
+  }
+  return count ?? 0;
 }
 
 export async function listFilaProcessos(limit = 100): Promise<FilaProcessoRow[]> {
@@ -765,6 +914,11 @@ export async function reprocessarFilaProcesso(id: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function cancelarFilaProcesso(id: string): Promise<void> {
+  const { error } = await supabase.from("fila_processos").delete().eq("id", id);
+  if (error) throw error;
+}
+
 export async function runOperationalHealthCheck(): Promise<OperationalHealthResult> {
   const checkedAt = new Date().toISOString();
   const externasDetalhes: OperationalHealthResult["externasDetalhes"] = [];
@@ -774,42 +928,105 @@ export async function runOperationalHealthCheck(): Promise<OperationalHealthResu
     .map((s) => s.trim())
     .filter(Boolean);
 
+  const emptyLatencies = (): Omit<
+    OperationalHealthResult,
+    "checkedAt" | "sistemaOnline" | "supabaseOk" | "supabaseMessage" | "externasOk" | "externasDetalhes"
+  > => ({
+    latenciaDbMs: null,
+    latenciaAuthMs: null,
+    latenciaStorageMs: null,
+    latenciaStripeMs: null,
+    stripeChaveConfigurada: false,
+    latenciaEdgeMs: null,
+    latenciaMediaSupabaseMs: null,
+  });
+
   if (!isSupabaseConfigured) {
-    return {
+    const fail: OperationalHealthResult = {
       checkedAt,
       sistemaOnline: false,
       supabaseOk: false,
       supabaseMessage: "Variáveis VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY não configuradas.",
+      ...emptyLatencies(),
       externasOk: urls.length === 0 ? null : false,
       externasDetalhes,
     };
+    recordOperationalPing(false);
+    return fail;
   }
 
-  const ping = await supabase.from("perfis").select("usuario_id", { head: true, count: "exact" });
-  const supabaseOk = !ping.error;
-  const supabaseMessage = ping.error ? formatSupabaseError(ping.error) : undefined;
+  const url = import.meta.env.VITE_SUPABASE_URL ?? "";
+  const anon = import.meta.env.VITE_SUPABASE_ANON_KEY ?? "";
 
-  for (const url of urls) {
+  const [db, auth, storage] = await Promise.all([
+    measureMs(async () => {
+      const r = await supabase.from("perfis").select("usuario_id").limit(1).maybeSingle();
+      if (r.error) throw r.error;
+    }),
+    measureMs(() => supabase.auth.getSession()),
+    measureMs(() => supabase.storage.listBuckets()),
+  ]);
+
+  const supabaseOk = db.ok;
+  const supabaseMessage = db.ok ? undefined : "Falha ao consultar PostgreSQL (perfis).";
+
+  let latenciaEdgeMs: number | null = null;
+  try {
+    const edge = await measureMs(async () => {
+      const r = await fetch(`${url.replace(/\/$/, "")}/functions/v1/`, {
+        method: "GET",
+        headers: { apikey: anon, Authorization: `Bearer ${anon}` },
+      });
+      if (r.status >= 500) throw new Error(String(r.status));
+    });
+    latenciaEdgeMs = edge.ms;
+  } catch {
+    latenciaEdgeMs = null;
+  }
+
+  const stripePk = Boolean((import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string | undefined)?.trim());
+  let latenciaStripeMs: number | null = null;
+  if (stripePk) {
+    const st = await measureMs(() => fetch("https://api.stripe.com/v1/", { mode: "no-cors" }));
+    latenciaStripeMs = st.ms;
+  }
+
+  const samples = [db.ok ? db.ms : null, auth.ok ? auth.ms : null, storage.ok ? storage.ms : null].filter(
+    (x): x is number => x != null,
+  );
+  const latenciaMediaSupabaseMs =
+    samples.length > 0 ? Math.round(samples.reduce((a, b) => a + b, 0) / samples.length) : null;
+
+  for (const extUrl of urls) {
     try {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 8000);
-      const res = await fetch(url, { method: "GET", signal: ctrl.signal, mode: "cors" });
+      const res = await fetch(extUrl, { method: "GET", signal: ctrl.signal, mode: "cors" });
       clearTimeout(t);
-      externasDetalhes.push({ url, ok: res.ok });
+      externasDetalhes.push({ url: extUrl, ok: res.ok });
     } catch (e) {
-      externasDetalhes.push({ url, ok: false, error: formatSupabaseError(e) });
+      externasDetalhes.push({ url: extUrl, ok: false, error: formatSupabaseError(e) });
     }
   }
 
   const externasOk =
     urls.length === 0 ? null : externasDetalhes.length > 0 && externasDetalhes.every((d) => d.ok);
-  const sistemaOnline = supabaseOk && (externasOk === null || externasOk === true);
+  const sistemaOnline = db.ok && auth.ok && storage.ok && (externasOk === null || externasOk === true);
+
+  recordOperationalPing(Boolean(sistemaOnline));
 
   return {
     checkedAt,
-    sistemaOnline,
+    sistemaOnline: Boolean(sistemaOnline),
     supabaseOk,
     supabaseMessage,
+    latenciaDbMs: db.ms,
+    latenciaAuthMs: auth.ms,
+    latenciaStorageMs: storage.ms,
+    latenciaStripeMs,
+    stripeChaveConfigurada: stripePk,
+    latenciaEdgeMs,
+    latenciaMediaSupabaseMs,
     externasOk,
     externasDetalhes,
   };
@@ -1217,7 +1434,15 @@ export type ListPerfisFilter = {
 };
 
 export async function listPerfis(filter?: ListPerfisFilter): Promise<Perfil[]> {
-  let q = supabase.from("perfis").select("usuario_id, nome_completo, role, equipe_id").order("nome_completo", { ascending: true });
+  const finalize = (rows: Perfil[]): Perfil[] => {
+    let out = rows;
+    if (filter?.equipeIdIsNull) {
+      out = out.filter((p) => (p.equipe_id ?? "").toString().trim() === "");
+    }
+    return out;
+  };
+
+  let q = supabase.from("perfis").select("usuario_id, nome_completo, role, equipe_id, created_at").order("nome_completo", { ascending: true });
   if (filter?.equipeIds?.length) {
     q = q.in("equipe_id", filter.equipeIds);
   } else if (filter?.equipeIdIsNull) {
@@ -1226,11 +1451,22 @@ export async function listPerfis(filter?: ListPerfisFilter): Promise<Perfil[]> {
   if (filter?.role) q = q.eq("role", filter.role);
   const res = await q;
   if (!res.error) {
-    let rows = (res.data ?? []) as Perfil[];
-    if (filter?.equipeIdIsNull) {
-      rows = rows.filter((p) => (p.equipe_id ?? "").toString().trim() === "");
+    return finalize((res.data ?? []) as Perfil[]);
+  }
+  const msg0 = res.error.message ?? "";
+  if (isSchemaMissingColumn(msg0, "created_at")) {
+    let q2 = supabase.from("perfis").select("usuario_id, nome_completo, role, equipe_id").order("nome_completo", { ascending: true });
+    if (filter?.equipeIds?.length) {
+      q2 = q2.in("equipe_id", filter.equipeIds);
+    } else if (filter?.equipeIdIsNull) {
+      q2 = q2.is("equipe_id", null);
     }
-    return rows;
+    if (filter?.role) q2 = q2.eq("role", filter.role);
+    const res2 = await q2;
+    if (!res2.error) {
+      return finalize((res2.data ?? []) as Perfil[]);
+    }
+    throw res2.error;
   }
 
   const msg = res.error.message ?? "";

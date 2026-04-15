@@ -20,6 +20,10 @@ import AdminOperacionalPage from "@/pages/AdminOperacional";
 import AdminConfigPage from "@/pages/AdminConfig";
 import AdminSegurancaPage from "@/pages/AdminSeguranca";
 import MonetizacaoPage from "@/pages/MonetizacaoPage";
+import AdminPlanosPage from "@/pages/AdminPlanosPage";
+import AdminCuponsPage from "@/pages/AdminCuponsPage";
+import AdminFeatureFlagsPage from "@/pages/AdminFeatureFlagsPage";
+import AdminComunicacoesPage from "@/pages/AdminComunicacoesPage";
 
 const routerFuture = {
   v7_startTransition: true,
@@ -54,7 +58,11 @@ export default function App() {
             <Route path="negocio" element={<Navigate to="/assinaturas" replace />} />
             <Route path="gestores" element={<GestoresPage />} />
             <Route path="assinaturas" element={<AssinaturasPage />} />
+            <Route path="planos" element={<AdminPlanosPage />} />
+            <Route path="cupons" element={<AdminCuponsPage />} />
             <Route path="monetizacao" element={<MonetizacaoPage />} />
+            <Route path="feature-flags" element={<AdminFeatureFlagsPage />} />
+            <Route path="comunicacoes" element={<AdminComunicacoesPage />} />
             <Route path="gestor-groups" element={<Navigate to="/gestores" replace />} />
             <Route path="insights" element={<AdminInsightsPage />} />
             <Route path="configuracoes" element={<AdminConfigPage />} />

@@ -76,21 +76,6 @@ export default function AuditLogsPage() {
     return <Navigate to="/dashboard" replace />;
   }
 
-  if (!hasApiUrl()) {
-    return (
-      <div className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Logs de auditoria</CardTitle>
-            <CardDescription>
-              Configure <code className="text-xs">VITE_API_URL</code> para ver os logs (backend com service role).
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
-    );
-  }
-
   const logs: AuditLogRow[] = data?.logs ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -105,8 +90,15 @@ export default function AuditLogsPage() {
               <CardTitle>Logs de auditoria</CardTitle>
               <CardDescription>
                 {total} registo(s) — visão{" "}
-                {scope?.kind === "global_admin" ? "global (todas as empresas)" : "da sua equipe"}.
-                Página {page + 1} de {totalPages}.
+                {scope?.kind === "global_admin" ? "global (todas as empresas)" : "da sua equipe"}. Página {page + 1} de{" "}
+                {totalPages}.
+                {!hasApiUrl() ? (
+                  <>
+                    {" "}
+                    Fonte: tabela <code className="text-xs">logs_acoes</code> (Supabase). Opcional:{" "}
+                    <code className="text-xs">VITE_API_URL</code> para uma API de auditoria com mais campos.
+                  </>
+                ) : null}
               </CardDescription>
             </div>
             <Button type="button" variant="outline" size="sm" onClick={() => void refetch()} disabled={isLoading}>
