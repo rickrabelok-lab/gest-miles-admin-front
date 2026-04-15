@@ -9,10 +9,28 @@ import { useAccessScope } from "@/hooks/useAccessScope";
 import { canAccessAppConfig, canAccessSecurityDashboard } from "@/lib/accessScope";
 import { countB2cClientesSemEquipe } from "@/lib/adminApi";
 import { countBetaFlagsInStorage } from "@/services/adminFeatureFlagsStore";
+import { countLgpdPendentes, loadBackupsLgpdState, loadBackupsLgpdStateFromBackend } from "@/services/adminBackupsLgpdStore";
+import { countDraftVersions, loadChangelogState, loadChangelogStateFromBackend } from "@/services/adminChangelogStore";
 import { loadSuporteState } from "@/services/adminSuporteStore";
 import { cn } from "@/lib/utils";
 
 const NONE = "__none__";
+const ADMIN_GERAL_ALLOWED_PREFIXES = [
+  "/dashboard",
+  "/insights",
+  "/equipes",
+  "/clients",
+  "/contas",
+  "/assinaturas",
+  "/relatorios",
+  "/monetizacao",
+  "/feature-flags",
+  "/suporte",
+  "/onboarding",
+  "/admin/backups-lgpd",
+  "/operacional",
+  "/logs",
+] as const;
 
 const ROUTE_TITLES: { prefix: string; title: string }[] = [
   { prefix: "/equipes/", title: "Equipe" },
@@ -36,6 +54,10 @@ const ROUTE_TITLES: { prefix: string; title: string }[] = [
   { prefix: "/feature-flags", title: "Feature Flags" },
   { prefix: "/comunicacoes", title: "Comunicações" },
   { prefix: "/suporte", title: "Suporte & Tickets" },
+  { prefix: "/api-webhooks", title: "API Keys & Webhooks" },
+  { prefix: "/onboarding", title: "Onboarding por Equipe" },
+  { prefix: "/admin/backups-lgpd", title: "Backups & LGPD" },
+  { prefix: "/admin/changelog", title: "Changelog" },
   { prefix: "/logs", title: "Logs" },
 ];
 
@@ -211,6 +233,48 @@ function NavIconSupport({ className }: { className?: string }) {
   );
 }
 
+function NavIconApiWebhooks({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+      <path d="M2 5h3l2-3 2 3h3" />
+      <path d="M2 11h3l2 3 2-3h3" />
+      <line x1="8" y1="2" x2="8" y2="14" />
+    </svg>
+  );
+}
+
+function NavIconOnboarding({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+      <path d="M8 2L3 5v4c0 3 2.5 5 5 6 2.5-1 5-3 5-6V5L8 2Z" />
+      <polyline points="5.5,8 7,9.5 10.5,6" />
+    </svg>
+  );
+}
+
+function NavIconDatabase({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+      <ellipse cx="8" cy="5" rx="6" ry="2.5" />
+      <path d="M2 5v6c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V5" />
+      <path d="M2 8c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5" />
+    </svg>
+  );
+}
+
+function NavIconChangelog({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+      <rect x="2" y="2" width="12" height="12" rx="2" />
+      <line x1="5" y1="6" x2="11" y2="6" />
+      <line x1="5" y1="9" x2="9" y2="9" />
+      <circle cx="11.5" cy="11.5" r="2.5" fill="currentColor" stroke="none" />
+      <line x1="10.5" y1="11.5" x2="12.5" y2="11.5" stroke="#fff" />
+      <line x1="11.5" y1="10.5" x2="11.5" y2="12.5" stroke="#fff" />
+    </svg>
+  );
+}
+
 type NavEntry = {
   to: string;
   label: string;
@@ -250,6 +314,10 @@ const NAV_GROUPS: { label: string; items: NavEntry[] }[] = [
       { to: "/feature-flags", label: "Feature Flags", Icon: NavIconFlags, badge: { text: "0 beta", kind: "warn" } },
       { to: "/comunicacoes", label: "Comunicações", Icon: NavIconChat },
       { to: "/suporte", label: "Suporte & Tickets", Icon: NavIconSupport, badge: { text: "0", kind: "warn" } },
+      { to: "/api-webhooks", label: "API Keys & Webhooks", Icon: NavIconApiWebhooks },
+      { to: "/onboarding", label: "Onboarding", Icon: NavIconOnboarding },
+      { to: "/admin/backups-lgpd", label: "Backups & LGPD", Icon: NavIconDatabase },
+      { to: "/admin/changelog", label: "Changelog", Icon: NavIconChangelog, badge: { text: "0", kind: "warn" } },
     ],
   },
   {
@@ -272,6 +340,8 @@ export default function AdminAppLayout() {
   const [supportOpenCount, setSupportOpenCount] = useState(() =>
     loadSuporteState().tickets.filter((ticket) => ticket.status === "aberto").length,
   );
+  const [lgpdPendingCount, setLgpdPendingCount] = useState(() => countLgpdPendentes(loadBackupsLgpdState()));
+  const [changelogDraftCount, setChangelogDraftCount] = useState(() => countDraftVersions(loadChangelogState()));
   const {
     equipesGrupoGestaoRaiz,
     selectedEquipeId,
@@ -321,6 +391,28 @@ export default function AdminAppLayout() {
     return () => window.removeEventListener("gm-admin-suporte-updated", refresh);
   }, []);
 
+  useEffect(() => {
+    const refresh = () => setLgpdPendingCount(countLgpdPendentes(loadBackupsLgpdState()));
+    window.addEventListener("gm-admin-backups-lgpd-updated", refresh);
+    return () => window.removeEventListener("gm-admin-backups-lgpd-updated", refresh);
+  }, []);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    void loadBackupsLgpdStateFromBackend().then((remote) => setLgpdPendingCount(countLgpdPendentes(remote)));
+  }, [user?.id]);
+
+  useEffect(() => {
+    const refresh = () => setChangelogDraftCount(countDraftVersions(loadChangelogState()));
+    window.addEventListener("gm-admin-changelog-updated", refresh);
+    return () => window.removeEventListener("gm-admin-changelog-updated", refresh);
+  }, []);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    void loadChangelogStateFromBackend().then((remote) => setChangelogDraftCount(countDraftVersions(remote)));
+  }, [user?.id]);
+
   const equipeDetalheId = useMemo(() => pathname.match(/^\/equipes\/([^/]+)$/)?.[1] ?? null, [pathname]);
 
   const pageTitle = useMemo(() => {
@@ -344,17 +436,30 @@ export default function AdminAppLayout() {
   }, [selectedEquipeId, equipeNomeEdicaoDraft, equipes]);
 
   const roleLabel = role === "admin_master" || scope?.kind === "global_admin" ? "Admin Master" : "Admin";
+  const isAdminMaster = role === "admin_master" || scope?.kind === "global_admin";
+
+  const canAdminGeralAccessPath = useMemo(() => {
+    return (path: string) =>
+      ADMIN_GERAL_ALLOWED_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+  }, []);
 
   const filteredGroups = useMemo(() => {
     return NAV_GROUPS.map((g) => ({
       ...g,
       items: g.items.filter((item) => {
+        if (!isAdminMaster && !canAdminGeralAccessPath(item.to)) return false;
         if (item.to === "/seguranca") return canAccessSecurityDashboard(scope);
         if (item.to === "/configuracoes") return canAccessAppConfig(scope);
         return true;
       }),
     })).filter((g) => g.items.length > 0);
-  }, [scope]);
+  }, [scope, isAdminMaster, canAdminGeralAccessPath]);
+
+  useEffect(() => {
+    if (!role || isAdminMaster) return;
+    if (canAdminGeralAccessPath(pathname)) return;
+    navigate("/dashboard", { replace: true });
+  }, [role, isAdminMaster, pathname, navigate, canAdminGeralAccessPath]);
 
   const equipeNomeLocked = equipeSelectionLocked
     ? nomeEquipeSelecionadaExibicao ?? selectedEquipeId
@@ -493,8 +598,12 @@ export default function AdminAppLayout() {
                             ? `${ffBetaCount} beta`
                           : item.to === "/suporte"
                             ? String(supportOpenCount)
+                          : item.to === "/admin/changelog"
+                            ? String(changelogDraftCount)
                             : item.badge.text}
                       </span>
+                    ) : item.to === "/admin/backups-lgpd" && lgpdPendingCount > 0 ? (
+                      <span className={cn("sb-badge", "warn")}>{String(lgpdPendingCount)}</span>
                     ) : null}
                   </NavLink>
                 );

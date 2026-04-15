@@ -13,6 +13,7 @@ import {
   SLA_HORAS,
   computeTicketKpis,
   loadSuporteState,
+  loadSuporteStateFromBackend,
   newMensagemTicketId,
   newTicketId,
   saveSuporteState,
@@ -113,7 +114,11 @@ export default function AdminSuportePage() {
 
   useEffect(() => {
     setState(loadSuporteState());
-    const onUpdate = () => setState(loadSuporteState());
+    void loadSuporteStateFromBackend().then((remoteState) => setState(remoteState));
+    const onUpdate = () => {
+      setState(loadSuporteState());
+      void loadSuporteStateFromBackend().then((remoteState) => setState(remoteState));
+    };
     window.addEventListener("gm-admin-suporte-updated", onUpdate);
     return () => window.removeEventListener("gm-admin-suporte-updated", onUpdate);
   }, []);

@@ -1,3 +1,5 @@
+import { listConfiguracoes, upsertConfiguracao } from "@/lib/adminApi";
+
 export type TicketStatus = "aberto" | "em_andamento" | "resolvido" | "fechado";
 export type TicketPrioridade = "urgente" | "alta" | "normal" | "baixa";
 export type TicketCategoria = "bug" | "duvida" | "financeiro" | "comercial" | "tecnico";
@@ -54,6 +56,7 @@ export const SLA_HORAS: Record<TicketPrioridade, number> = {
 };
 
 const STORAGE_KEY = "gm-admin-suporte-v1";
+const BACKEND_CONFIG_KEY = "admin_suporte_snapshot";
 
 function isoWithOffset(minutesAgo: number): string {
   return new Date(Date.now() - minutesAgo * 60_000).toISOString();
@@ -250,7 +253,39 @@ export function loadSuporteState(): SuporteState {
 export function saveSuporteState(state: SuporteState): void {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  void saveSuporteStateToBackend(state);
   window.dispatchEvent(new CustomEvent("gm-admin-suporte-updated"));
+}
+
+function isValidSuporteState(value: unknown): value is SuporteState {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<SuporteState>;
+  return Array.isArray(candidate.tickets) && Array.isArray(candidate.mensagens) && Array.isArray(candidate.admins) && Array.isArray(candidate.solicitantes);
+}
+
+export async function loadSuporteStateFromBackend(): Promise<SuporteState> {
+  const local = loadSuporteState();
+  try {
+    const rows = await listConfiguracoes();
+    const row = rows.find((item) => item.chave === BACKEND_CONFIG_KEY);
+    if (!row) return local;
+    if (!isValidSuporteState(row.valor)) return local;
+    return { ...local, ...row.valor };
+  } catch {
+    return local;
+  }
+}
+
+export async function saveSuporteStateToBackend(state: SuporteState): Promise<void> {
+  try {
+    await upsertConfiguracao({
+      chave: BACKEND_CONFIG_KEY,
+      valor: state,
+      descricao: "Snapshot da tela admin de suporte/tickets",
+    });
+  } catch {
+    // Fallback local já cobre indisponibilidade de backend.
+  }
 }
 
 export function newTicketId(tickets: Ticket[]): string {

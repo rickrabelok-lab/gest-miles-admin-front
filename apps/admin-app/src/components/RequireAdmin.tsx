@@ -4,6 +4,27 @@ import { Link, Navigate, useLocation } from "react-router-dom";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { isAdminPanelRole } from "@/lib/accessScope";
 
+const ADMIN_GERAL_ALLOWED_PREFIXES = [
+  "/dashboard",
+  "/insights",
+  "/equipes",
+  "/clients",
+  "/contas",
+  "/assinaturas",
+  "/relatorios",
+  "/monetizacao",
+  "/feature-flags",
+  "/suporte",
+  "/onboarding",
+  "/admin/backups-lgpd",
+  "/operacional",
+  "/logs",
+] as const;
+
+function canAdminGeralAccess(pathname: string): boolean {
+  return ADMIN_GERAL_ALLOWED_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
 /**
  * Painel administrativo: `perfis.role` em { admin, admin_master }.
  * Outros roles autenticados vêem "Acesso não autorizado" (sem entrar nas rotas).
@@ -104,6 +125,11 @@ export default function RequireAdmin({ children }: { children: ReactNode }) {
         </div>
       </div>
     );
+  }
+
+  const isAdminMaster = role === "admin_master";
+  if (!isAdminMaster && !canAdminGeralAccess(location.pathname)) {
+    return <Navigate to="/dashboard" replace />;
   }
 
   return <>{children}</>;

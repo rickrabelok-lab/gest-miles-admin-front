@@ -26,6 +26,10 @@ import AdminFeatureFlagsPage from "@/pages/AdminFeatureFlagsPage";
 import AdminComunicacoesPage from "@/pages/AdminComunicacoesPage";
 import AdminRelatoriosPage from "@/pages/AdminRelatoriosPage";
 import AdminSuportePage from "@/pages/AdminSuportePage";
+import AdminApiWebhooksPage from "@/pages/AdminApiWebhooksPage";
+import AdminOnboardingPage from "@/pages/AdminOnboardingPage";
+import AdminBackupsLgpdPage from "@/pages/AdminBackupsLgpdPage";
+import AdminChangelogPage from "@/pages/AdminChangelogPage";
 
 const routerFuture = {
   v7_startTransition: true,
@@ -67,6 +71,12 @@ export default function App() {
             <Route path="feature-flags" element={<AdminFeatureFlagsPage />} />
             <Route path="comunicacoes" element={<AdminComunicacoesPage />} />
             <Route path="suporte" element={<AdminSuportePage />} />
+            <Route path="api-webhooks" element={<AdminApiWebhooksPage />} />
+            <Route path="onboarding" element={<AdminOnboardingPage />} />
+            <Route path="admin/backups-lgpd" element={<AdminBackupsLgpdPage />} />
+            <Route path="backups-lgpd" element={<Navigate to="/admin/backups-lgpd" replace />} />
+            <Route path="admin/changelog" element={<AdminChangelogPage />} />
+            <Route path="changelog" element={<Navigate to="/admin/changelog" replace />} />
             <Route path="gestor-groups" element={<Navigate to="/gestores" replace />} />
             <Route path="insights" element={<AdminInsightsPage />} />
             <Route path="configuracoes" element={<AdminConfigPage />} />

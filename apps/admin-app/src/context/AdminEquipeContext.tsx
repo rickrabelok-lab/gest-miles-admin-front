@@ -47,7 +47,11 @@ const STORAGE_KEY = "admin-selected-equipe-id";
 export function AdminEquipeProvider({ children }: PropsWithChildren) {
   const { role, equipeId: authEquipeId, roleLoading: authRoleLoading } = useAdminAuth();
   const equipeSelectionLocked = Boolean(
-    !authRoleLoading && isAdminPanelRole(role) && authEquipeId != null && String(authEquipeId).trim() !== "",
+    !authRoleLoading &&
+      isAdminPanelRole(role) &&
+      role !== "admin_master" &&
+      authEquipeId != null &&
+      String(authEquipeId).trim() !== "",
   );
 
   const [equipes, setEquipes] = useState<Equipe[]>([]);
@@ -102,21 +106,13 @@ export function AdminEquipeProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     if (authRoleLoading || !equipeSelectionLocked || !authEquipeId) return;
     setSelectedEquipeIdState(authEquipeId);
-    sessionStorage.setItem(STORAGE_KEY, authEquipeId);
   }, [authRoleLoading, equipeSelectionLocked, authEquipeId]);
 
   useEffect(() => {
     if (equipeSelectionLocked || loading || equipes.length === 0) return;
-    const stored = sessionStorage.getItem(STORAGE_KEY);
-    if (stored && equipes.some((e) => e.id === stored)) {
-      setSelectedEquipeIdState(stored);
-      return;
-    }
-    if (equipes.length === 1) {
-      const only = equipes[0]!.id;
-      setSelectedEquipeIdState(only);
-      sessionStorage.setItem(STORAGE_KEY, only);
-    }
+    // Para Admin Master/global, o escopo padrão deve ser sempre independente de uma equipe.
+    setSelectedEquipeIdState(null);
+    sessionStorage.removeItem(STORAGE_KEY);
   }, [equipeSelectionLocked, loading, equipes]);
 
   const equipeIdsFiltro = useMemo(() => {

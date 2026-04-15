@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -91,15 +91,7 @@ export default function EquipeDetailPage() {
   const { setEquipeNomeEdicaoDraft, patchEquipeNomeInList } = useAdminEquipe();
   const allowGlobalEquipes = canManageEquipesGlobally(scope);
   const { equipeId } = useParams<{ equipeId: string }>();
-  const navigate = useNavigate();
   const groupId = equipeId ?? "";
-
-  /** Perfil / dados de conta (como no Manager), não só roles no painel Utilizadores. */
-  const openContaDono = (usuarioId: string) => {
-    if (!equipeId) return;
-    const voltar = `/equipes/${encodeURIComponent(equipeId)}`;
-    navigate(`/contas/${encodeURIComponent(usuarioId)}?voltar=${encodeURIComponent(voltar)}`);
-  };
 
   const [equipe, setEquipe] = useState<Equipe | null>(null);
   const [gestores, setGestores] = useState<Perfil[]>([]);
@@ -730,21 +722,10 @@ export default function EquipeDetailPage() {
             {linhasMembros.map((row, idx) => {
               const g = avatarGrad(row.perfil.usuario_id, idx);
               const labelRole = row.kind === "admin_equipe" ? "Admin Equipe" : row.kind === "gestor" ? "Gestor" : "CS";
-              const displayName = row.perfil.nome_completo ?? row.perfil.usuario_id;
               return (
                 <div
                   key={row.perfil.usuario_id}
-                  className="eq-member-row eq-member-row-clickable"
-                  role="link"
-                  tabIndex={0}
-                  aria-label={`Abrir conta de ${displayName} (perfil como no app de gestão)`}
-                  onClick={() => openContaDono(row.perfil.usuario_id)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      openContaDono(row.perfil.usuario_id);
-                    }
-                  }}
+                  className="eq-member-row"
                 >
                   <div className="eq-m-av" style={{ background: `linear-gradient(135deg, ${g.from}, ${g.to})` }}>
                     {initialsFromNome(row.perfil.nome_completo ?? row.perfil.usuario_id)}
@@ -757,9 +738,6 @@ export default function EquipeDetailPage() {
                     className={`eq-role-badge${row.kind === "admin_equipe" ? " eq-role-admin" : row.kind === "gestor" ? " eq-role-gestor" : " eq-role-cs"}`}
                   >
                     {labelRole}
-                  </span>
-                  <span style={{ fontSize: 11, color: "var(--t3)", marginLeft: 8, whiteSpace: "nowrap" }} title="Abre o perfil de conta (dados como no Manager)">
-                    Conta →
                   </span>
                 </div>
               );
@@ -935,21 +913,9 @@ export default function EquipeDetailPage() {
                     .filter((p) => p.role === "cliente" || p.role === "cliente_gestao")
                     .map((p, i) => {
                       const g = avatarGrad(p.usuario_id, i);
-                      const clienteNome = p.nome_completo ?? "—";
                       return (
                         <tr
                           key={p.usuario_id}
-                          className="eq-cliente-row-clickable"
-                          tabIndex={0}
-                          role="link"
-                          aria-label={`Abrir conta de ${clienteNome} (perfil como no app de gestão)`}
-                          onClick={() => openContaDono(p.usuario_id)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              openContaDono(p.usuario_id);
-                            }
-                          }}
                         >
                           <td>
                             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
