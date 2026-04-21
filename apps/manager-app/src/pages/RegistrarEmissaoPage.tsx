@@ -50,6 +50,7 @@ const RegistrarEmissaoPage = () => {
     return d.toISOString().slice(0, 10);
   });
   const [observacoes, setObservacoes] = useState("");
+  const [sobrenomeEmissao, setSobrenomeEmissao] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -82,6 +83,10 @@ const RegistrarEmissaoPage = () => {
       toast.error("Informe a data da emissão.");
       return;
     }
+    if (!sobrenomeEmissao.trim()) {
+      toast.error("Informe o sobrenome na emissão (como na bilheteira) para localizar a reserva.");
+      return;
+    }
 
     setSaving(true);
     try {
@@ -98,6 +103,7 @@ const RegistrarEmissaoPage = () => {
         data_emissao: dataEmissao,
         usuario_responsavel: user.id,
         observacoes: observacoes.trim() || null,
+        sobrenome_emissao: sobrenomeEmissao.trim(),
       });
       toast.success("Emissão registrada com sucesso. As milhas foram debitadas da conta do cliente.");
       setClienteId("");
@@ -111,6 +117,7 @@ const RegistrarEmissaoPage = () => {
       setTaxaEmbarque("");
       setDataEmissao(new Date().toISOString().slice(0, 10));
       setObservacoes("");
+      setSobrenomeEmissao("");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Erro ao salvar emissão.";
       toast.error(msg);
@@ -276,6 +283,24 @@ const RegistrarEmissaoPage = () => {
                   onChange={setDataEmissao}
                   placeholder="Escolher data"
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="sobrenome-emissao">
+                  Sobrenome na emissão <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="sobrenome-emissao"
+                  placeholder="Sobrenome na emissão"
+                  value={sobrenomeEmissao}
+                  onChange={(e) => setSobrenomeEmissao(e.target.value)}
+                  required
+                  aria-required
+                  autoComplete="family-name"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Como consta na bilheteira, para localizar a reserva junto ao PNR.
+                </p>
               </div>
 
               <div className="space-y-2">

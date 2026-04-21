@@ -31,6 +31,7 @@ import AdminOnboardingPage from "@/pages/AdminOnboardingPage";
 import AdminBackupsLgpdPage from "@/pages/AdminBackupsLgpdPage";
 import AdminChangelogPage from "@/pages/AdminChangelogPage";
 import AdminPesquisaPassagensPage from "@/pages/AdminPesquisaPassagensPage";
+import AdminBrandingPage from "@/pages/AdminBrandingPage";
 
 const routerFuture = {
   v7_startTransition: true,
@@ -81,6 +82,7 @@ export default function App() {
             <Route path="gestor-groups" element={<Navigate to="/gestores" replace />} />
             <Route path="insights" element={<AdminInsightsPage />} />
             <Route path="pesquisa-passagens" element={<AdminPesquisaPassagensPage />} />
+            <Route path="branding" element={<AdminBrandingPage />} />
             <Route path="configuracoes" element={<AdminConfigPage />} />
             <Route path="seguranca" element={<AdminSegurancaPage />} />
             <Route path="logs" element={<AuditLogsPage />} />

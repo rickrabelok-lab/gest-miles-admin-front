@@ -17,12 +17,28 @@ export interface PesquisaPassagensConfigAdmin {
   max_searches_user_per_day: number | null;
   max_searches_equipe_per_day: number | null;
   destination_images: Record<string, string>;
+  /** Logos rail / wordmark (chaves estáveis: rail_logo, rail_wordmark). */
+  brand_assets: Record<string, string>;
+  /** Logos por programa: smiles, tudoazul, latam, tap, aa. */
+  airline_logos: Record<string, string>;
   tokens_per_search: number;
   monthly_token_allowance_user: number | null;
   monthly_token_allowance_equipe: number | null;
   plan_limits: Record<string, PesquisaPassagensPlanLimitEntry> | null;
   updated_at: string | null;
   updated_by: string | null;
+}
+
+function parseJsonObjectStringMap(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const key = k.trim();
+    if (!key || typeof v !== "string") continue;
+    const url = v.trim();
+    if (url) out[key] = url;
+  }
+  return out;
 }
 
 function parseRow(raw: Record<string, unknown>): PesquisaPassagensConfigAdmin {
@@ -41,6 +57,8 @@ function parseRow(raw: Record<string, unknown>): PesquisaPassagensConfigAdmin {
       raw.max_searches_equipe_per_day == null ? null : Number(raw.max_searches_equipe_per_day),
     destination_images:
       dest && typeof dest === "object" && !Array.isArray(dest) ? (dest as Record<string, string>) : {},
+    brand_assets: parseJsonObjectStringMap(raw.brand_assets),
+    airline_logos: parseJsonObjectStringMap(raw.airline_logos),
     tokens_per_search:
       raw.tokens_per_search == null || raw.tokens_per_search === ""
         ? 1
@@ -76,6 +94,8 @@ export async function fetchPesquisaPassagensConfig(): Promise<{
         max_searches_user_per_day: null,
         max_searches_equipe_per_day: null,
         destination_images: {},
+        brand_assets: {},
+        airline_logos: {},
         tokens_per_search: 1,
         monthly_token_allowance_user: null,
         monthly_token_allowance_equipe: null,
@@ -89,6 +109,26 @@ export async function fetchPesquisaPassagensConfig(): Promise<{
   return { data: parseRow(data as Record<string, unknown>), error: null };
 }
 
+/** Grava só imagens/branding — não toca em colunas de tokens nem no resto da config (evita erros se a BD não tiver essas colunas). */
+export async function updatePesquisaPassagensBrandingAssets(input: {
+  destination_images: Record<string, string>;
+  brand_assets: Record<string, string>;
+  airline_logos: Record<string, string>;
+  updated_by: string | null;
+}): Promise<{ error: string | null }> {
+  const { error } = await supabase
+    .from("pesquisa_passagens_config")
+    .update({
+      destination_images: input.destination_images,
+      brand_assets: input.brand_assets,
+      airline_logos: input.airline_logos,
+      updated_at: new Date().toISOString(),
+      updated_by: input.updated_by,
+    })
+    .eq("id", 1);
+  return { error: error?.message ?? null };
+}
+
 export async function savePesquisaPassagensConfig(input: {
   feature_enabled: boolean;
   allowed_roles: string[] | null;
@@ -98,12 +138,15 @@ export async function savePesquisaPassagensConfig(input: {
   max_searches_user_per_day: number | null;
   max_searches_equipe_per_day: number | null;
   destination_images: Record<string, string>;
+  brand_assets: Record<string, string>;
+  airline_logos: Record<string, string>;
   tokens_per_search: number;
   monthly_token_allowance_user: number | null;
   monthly_token_allowance_equipe: number | null;
   plan_limits: Record<string, PesquisaPassagensPlanLimitEntry> | null;
   updated_by: string | null;
 }): Promise<{ error: string | null }> {
+  // Não enviar colunas de tokens no upsert até existirem na tabela (schema cache do PostgREST).
   const { error } = await supabase.from("pesquisa_passagens_config").upsert(
     {
       id: 1,
@@ -115,9 +158,9 @@ export async function savePesquisaPassagensConfig(input: {
       max_searches_user_per_day: input.max_searches_user_per_day,
       max_searches_equipe_per_day: input.max_searches_equipe_per_day,
       destination_images: input.destination_images,
+      brand_assets: input.brand_assets,
+      airline_logos: input.airline_logos,
       tokens_per_search: Math.max(1, input.tokens_per_search),
-      monthly_token_allowance_user: input.monthly_token_allowance_user,
-      monthly_token_allowance_equipe: input.monthly_token_allowance_equipe,
       plan_limits: input.plan_limits,
       updated_at: new Date().toISOString(),
       updated_by: input.updated_by,

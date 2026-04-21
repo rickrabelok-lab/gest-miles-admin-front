@@ -44,6 +44,7 @@ const ROUTE_TITLES: { prefix: string; title: string }[] = [
   { prefix: "/dashboard", title: "Dashboard" },
   { prefix: "/insights", title: "Insights" },
   { prefix: "/pesquisa-passagens", title: "Pesquisa de passagens" },
+  { prefix: "/branding", title: "Marca e imagens" },
   { prefix: "/equipes", title: "Equipes de Gestão" },
   { prefix: "/users", title: "Usuários" },
   { prefix: "/clients", title: "Usuários B2C" },
@@ -291,6 +292,17 @@ function NavIconPlane({ className }: { className?: string }) {
   );
 }
 
+function NavIconPalette({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+      <circle cx="5.5" cy="6" r="2.5" />
+      <circle cx="11" cy="5" r="2" />
+      <circle cx="9" cy="11" r="2.5" />
+      <path d="M3 13c.8-2.5 2.5-4 4.5-4.5" />
+    </svg>
+  );
+}
+
 type NavEntry = {
   to: string;
   label: string;
@@ -306,6 +318,7 @@ const NAV_GROUPS: { label: string; items: NavEntry[] }[] = [
       { to: "/dashboard", label: "Dashboard", Icon: NavIconDashboard, end: true },
       { to: "/insights", label: "Insights", Icon: NavIconChart, badge: { text: "Novo", kind: "ok" } },
       { to: "/pesquisa-passagens", label: "Pesquisa passagens", Icon: NavIconPlane, badge: { text: "Gestor", kind: "ok" } },
+      { to: "/branding", label: "Marca e imagens", Icon: NavIconPalette, badge: { text: "Gestor", kind: "ok" } },
     ],
   },
   {
@@ -471,6 +484,7 @@ export default function AdminAppLayout() {
       ...g,
       items: g.items.filter((item) => {
         if (item.to === "/pesquisa-passagens" && !isAdminMasterRole(role)) return false;
+        if (item.to === "/branding" && !isAdminMasterRole(role)) return false;
         if (!hasFullNav && !canAdminGeralAccessPath(item.to)) return false;
         if (item.to === "/seguranca") return canAccessSecurityDashboard(scope);
         if (item.to === "/configuracoes") return canAccessAppConfig(scope);

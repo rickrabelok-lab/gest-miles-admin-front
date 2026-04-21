@@ -94,6 +94,8 @@ function defaultsFromRow(row: PesquisaPassagensConfigAdmin | null): {
   monthlyTokensEquipe: string;
   planLimitsJson: string;
   destinationImagesJson: string;
+  brandAssetsJson: string;
+  airlineLogosJson: string;
 } {
   if (!row) {
     return {
@@ -109,6 +111,8 @@ function defaultsFromRow(row: PesquisaPassagensConfigAdmin | null): {
       monthlyTokensEquipe: "",
       planLimitsJson: "{}\n",
       destinationImagesJson: "{}\n",
+      brandAssetsJson: "{}\n",
+      airlineLogosJson: "{}\n",
     };
   }
   return {
@@ -126,6 +130,8 @@ function defaultsFromRow(row: PesquisaPassagensConfigAdmin | null): {
     destinationImagesJson: Object.keys(row.destination_images).length
       ? `${JSON.stringify(row.destination_images, null, 2)}\n`
       : "{}\n",
+    brandAssetsJson: Object.keys(row.brand_assets).length ? `${JSON.stringify(row.brand_assets, null, 2)}\n` : "{}\n",
+    airlineLogosJson: Object.keys(row.airline_logos).length ? `${JSON.stringify(row.airline_logos, null, 2)}\n` : "{}\n",
   };
 }
 
@@ -147,6 +153,8 @@ export default function AdminPesquisaPassagensPage() {
   const [monthlyTokensEquipe, setMonthlyTokensEquipe] = useState("");
   const [planLimitsJson, setPlanLimitsJson] = useState("{}\n");
   const [destinationImagesJson, setDestinationImagesJson] = useState("{}\n");
+  const [brandAssetsJson, setBrandAssetsJson] = useState("{}\n");
+  const [airlineLogosJson, setAirlineLogosJson] = useState("{}\n");
 
   const load = useCallback(async () => {
     if (!master) return;
@@ -170,6 +178,8 @@ export default function AdminPesquisaPassagensPage() {
     setMonthlyTokensEquipe(d.monthlyTokensEquipe);
     setPlanLimitsJson(d.planLimitsJson);
     setDestinationImagesJson(d.destinationImagesJson);
+    setBrandAssetsJson(d.brandAssetsJson);
+    setAirlineLogosJson(d.airlineLogosJson);
     setLoadPending(false);
   }, [master]);
 
@@ -188,6 +198,16 @@ export default function AdminPesquisaPassagensPage() {
       toast.error("JSON de imagens inválido.");
       return;
     }
+    const parsedBrand = parseImagesJson(brandAssetsJson);
+    if (parsedBrand === null) {
+      toast.error("JSON de brand_assets inválido.");
+      return;
+    }
+    const parsedAirline = parseImagesJson(airlineLogosJson);
+    if (parsedAirline === null) {
+      toast.error("JSON de airline_logos inválido.");
+      return;
+    }
     const tps = Math.max(1, Math.floor(Number(tokensPerSearch)) || 1);
     setSavePending(true);
     const { error } = await savePesquisaPassagensConfig({
@@ -199,6 +219,8 @@ export default function AdminPesquisaPassagensPage() {
       max_searches_user_per_day: parseOptionalInt(maxUser),
       max_searches_equipe_per_day: parseOptionalInt(maxEquipe),
       destination_images: parsedImgs,
+      brand_assets: parsedBrand,
+      airline_logos: parsedAirline,
       tokens_per_search: tps,
       monthly_token_allowance_user: parseOptionalInt(monthlyTokensUser),
       monthly_token_allowance_equipe: parseOptionalInt(monthlyTokensEquipe),
@@ -364,6 +386,42 @@ export default function AdminPesquisaPassagensPage() {
               spellCheck={false}
               aria-label="destination_images JSON"
             />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Branding (JSON avançado)</CardTitle>
+            <CardDescription>
+              Preferível usar a página <strong>Marca e imagens</strong> no menu para upload. Aqui pode editar o JSON
+              bruto: <code className="text-xs">brand_assets</code> (ex. <code className="text-xs">rail_logo</code>,{" "}
+              <code className="text-xs">rail_wordmark</code>) e <code className="text-xs">airline_logos</code> (ex.{" "}
+              <code className="text-xs">smiles</code>, <code className="text-xs">latam</code>).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="pp-brand">brand_assets</Label>
+              <textarea
+                id="pp-brand"
+                className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex min-h-[120px] w-full rounded-md border px-3 py-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+                value={brandAssetsJson}
+                onChange={(e) => setBrandAssetsJson(e.target.value)}
+                spellCheck={false}
+                aria-label="brand_assets JSON"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pp-airline">airline_logos</Label>
+              <textarea
+                id="pp-airline"
+                className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex min-h-[120px] w-full rounded-md border px-3 py-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+                value={airlineLogosJson}
+                onChange={(e) => setAirlineLogosJson(e.target.value)}
+                spellCheck={false}
+                aria-label="airline_logos JSON"
+              />
+            </div>
           </CardContent>
         </Card>
 

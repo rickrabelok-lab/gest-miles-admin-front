@@ -18,6 +18,8 @@ export type Movimento = {
   tarifaPagante?: number;
   economiaReal?: number;
   custoMilheiroBase?: number;
+  codigoReserva?: string;
+  sobrenomeEmissao?: string;
 };
 
 export type LoteMilhas = {

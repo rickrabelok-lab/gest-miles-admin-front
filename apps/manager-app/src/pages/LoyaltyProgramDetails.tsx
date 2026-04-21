@@ -82,6 +82,7 @@ type Movimento = {
   economiaReal?: number;
   custoMilheiroBase?: number;
   codigoReserva?: string;
+  sobrenomeEmissao?: string;
 };
 
 type LoteMilhas = {
@@ -851,7 +852,7 @@ const LoyaltyProgramDetails = () => {
   const [emitBagagem, setEmitBagagem] = useState(false);
   const [emitAssento, setEmitAssento] = useState(false);
   const [emitSeguro, setEmitSeguro] = useState(false);
-  const [emitOutroAdd, setEmitOutroAdd] = useState("");
+  const [emitSobrenomeEmissao, setEmitSobrenomeEmissao] = useState("");
   const [emitCodigoReserva, setEmitCodigoReserva] = useState("");
 
   const [emitMilhas, setEmitMilhas] = useState(0);
@@ -905,7 +906,18 @@ const LoyaltyProgramDetails = () => {
     classificacaoEmissao === "vantajosa" ? "text-emerald-400" : "text-red-400";
 
   const handleSalvarSaida = () => {
-    if (emitMilhas <= 0) return;
+    if (emitMilhas <= 0) {
+      toast.error("Informe as milhas utilizadas (maior que zero).");
+      return;
+    }
+    if (!emitCodigoReserva.trim()) {
+      toast.error("Informe o código da reserva (PNR / localizador).");
+      return;
+    }
+    if (!emitSobrenomeEmissao.trim()) {
+      toast.error("Informe o sobrenome na emissão (como na bilheteira) para localizar a reserva.");
+      return;
+    }
     const milhasSaida = Math.min(emitMilhas, saldo);
     const novoSaldo = Math.max(saldo - milhasSaida, 0);
     const custoRemovido = (milhasSaida / 1000) * custoMedioMilheiro;
@@ -967,6 +979,7 @@ const LoyaltyProgramDetails = () => {
       economiaReal: economiaRealEmissao,
       custoMilheiroBase: custoMedioMilheiroReferencia,
       codigoReserva: emitCodigoReserva.trim() || undefined,
+      sobrenomeEmissao: emitSobrenomeEmissao.trim(),
     };
 
     setMovimentos((anterior) => [movimentoEmissao, ...anterior]);
@@ -1985,18 +1998,38 @@ const LoyaltyProgramDetails = () => {
                     </label>
                   </div>
                 </div>
-                <Input
-                  value={emitOutroAdd}
-                  onChange={(event) => setEmitOutroAdd(event.target.value)}
-                  placeholder="Outros adicionais (opcional)"
-                  className="h-8 border-slate-800 bg-slate-950 text-xs"
-                />
-                <Input
-                  value={emitCodigoReserva}
-                  onChange={(event) => setEmitCodigoReserva(event.target.value)}
-                  placeholder="Código da reserva (ex: ABC123)"
-                  className="h-8 border-slate-800 bg-slate-950 text-xs"
-                />
+                <div>
+                  <p className="mb-1 text-[11px] text-slate-300">
+                    Sobrenome na emissão — obrigatório{" "}
+                    <span className="text-red-400">*</span>
+                  </p>
+                  <Input
+                    value={emitSobrenomeEmissao}
+                    onChange={(event) => setEmitSobrenomeEmissao(event.target.value)}
+                    placeholder="Sobrenome na emissão"
+                    className="h-8 border-slate-800 bg-slate-950 text-xs"
+                    required
+                    aria-required
+                    autoComplete="family-name"
+                  />
+                  <p className="mt-1 text-[10px] text-slate-500">
+                    Como consta na bilheteira, para localizar a reserva junto ao PNR.
+                  </p>
+                </div>
+                <div>
+                  <p className="mb-1 text-[11px] text-slate-300">
+                    Código da reserva (PNR / localizador) — obrigatório{" "}
+                    <span className="text-red-400">*</span>
+                  </p>
+                  <Input
+                    value={emitCodigoReserva}
+                    onChange={(event) => setEmitCodigoReserva(event.target.value)}
+                    placeholder="Ex.: ABC123"
+                    className="h-8 border-slate-800 bg-slate-950 text-xs"
+                    required
+                    aria-required
+                  />
+                </div>
               </div>
 
               {/* 2. Dados financeiros */}
