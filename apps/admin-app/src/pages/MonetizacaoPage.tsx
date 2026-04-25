@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { AlertCircle, CheckCircle2, PauseCircle, TimerReset } from "lucide-react";
+import { toast } from "sonner";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -46,7 +49,43 @@ type SubscriptionListItem = {
   id: string;
   status: string;
   customer?: string | { id?: string } | null;
+  pause_collection?: { behavior?: string | null } | null;
+  cancel_at_period_end?: boolean;
+  current_period_end?: number | null;
 };
+
+function statusBadgeVariant(
+  status: string,
+): "default" | "secondary" | "outline" | "destructive" {
+  if (status === "active" || status === "trialing") return "default";
+  if (status === "past_due" || status === "unpaid") return "destructive";
+  return "secondary";
+}
+
+function shortId(value: string, max = 16): string {
+  if (!value) return "—";
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1)}…`;
+}
+
+function formatUnixDate(unixSeconds?: number | null): string {
+  if (!unixSeconds || !Number.isFinite(unixSeconds)) return "—";
+  return new Date(unixSeconds * 1000).toLocaleDateString("pt-BR");
+}
+
+function subscriptionOperationLabel(sub: SubscriptionListItem): {
+  label: string;
+  icon: typeof PauseCircle;
+  variant: "default" | "secondary" | "outline" | "destructive";
+} {
+  if (sub.pause_collection) {
+    return { label: "Cobrança pausada", icon: PauseCircle, variant: "destructive" };
+  }
+  if (sub.cancel_at_period_end) {
+    return { label: "Cancelamento agendado", icon: TimerReset, variant: "secondary" };
+  }
+  return { label: "Operação normal", icon: CheckCircle2, variant: "outline" };
+}
 
 function normalizeSlug(raw: string): string {
   return raw
@@ -116,6 +155,8 @@ export default function MonetizacaoPage() {
   const [stripePlanosWarning, setStripePlanosWarning] = useState<string | null>(null);
   const [assinaturasSource, setAssinaturasSource] = useState<"stripe" | "supabase_fallback">("stripe");
   const [stripeAssinaturasWarning, setStripeAssinaturasWarning] = useState<string | null>(null);
+  const [subscriptionActionId, setSubscriptionActionId] = useState<string | null>(null);
+  const [subscriptionFilter, setSubscriptionFilter] = useState<"all" | "paused" | "canceling" | "active_only">("all");
 
   const [createOpen, setCreateOpen] = useState(false);
   const [newSlug, setNewSlug] = useState("");
@@ -127,6 +168,27 @@ export default function MonetizacaoPage() {
 
   const [editPlan, setEditPlan] = useState<PlanRow | null>(null);
   const [pricePlan, setPricePlan] = useState<PlanRow | null>(null);
+
+  const subsByState = useMemo(() => {
+    const active = subs.filter((s) => s.status === "active").length;
+    const trialing = subs.filter((s) => s.status === "trialing").length;
+    const problematic = subs.filter((s) => s.status === "past_due" || s.status === "unpaid").length;
+    return { active, trialing, problematic, total: subs.length };
+  }, [subs]);
+
+  const filteredSubs = useMemo(() => {
+    if (subscriptionFilter === "paused") return subs.filter((s) => Boolean(s.pause_collection));
+    if (subscriptionFilter === "canceling") return subs.filter((s) => Boolean(s.cancel_at_period_end));
+    if (subscriptionFilter === "active_only") return subs.filter((s) => s.status === "active" && !s.pause_collection);
+    return subs;
+  }, [subs, subscriptionFilter]);
+
+  const subsFiltersCount = useMemo(() => {
+    const paused = subs.filter((s) => Boolean(s.pause_collection)).length;
+    const canceling = subs.filter((s) => Boolean(s.cancel_at_period_end)).length;
+    const activeOnly = subs.filter((s) => s.status === "active" && !s.pause_collection).length;
+    return { paused, canceling, activeOnly };
+  }, [subs]);
 
   const loadPlans = useCallback(async () => {
     if (!token || !hasApiUrl()) return;
@@ -233,6 +295,11 @@ export default function MonetizacaoPage() {
     void loadPlans();
   }, [token, loadPlans]);
 
+  useEffect(() => {
+    if (!token) return;
+    void loadSubs();
+  }, [token, loadSubs]);
+
   const handleCreatePlan = async () => {
     if (!token || !hasApiUrl() || planosSource === "local_preview") return;
     const monthlyCents = Math.round(parseFloat(newMonthly.replace(",", ".")) * 100);
@@ -335,11 +402,17 @@ export default function MonetizacaoPage() {
 
   const subAction = async (path: string, body?: Record<string, unknown>) => {
     if (!token || !hasApiUrl()) return;
+    const parts = path.split("/");
+    const subId = parts[parts.length - 2] || null;
+    setSubscriptionActionId(subId);
     try {
       await apiFetch(path, { method: "POST", token, body: JSON.stringify(body ?? {}) });
       await loadSubs();
+      toast.success("Operação executada com sucesso.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro na operação.");
+    } finally {
+      setSubscriptionActionId(null);
     }
   };
 
@@ -432,6 +505,38 @@ export default function MonetizacaoPage() {
         </p>
       </div>
 
+      <div className="grid gap-3 md:grid-cols-4">
+        <Card className="border-primary/20 bg-primary/5">
+          <CardHeader className="pb-2">
+            <CardDescription>Fonte atual de assinaturas</CardDescription>
+            <CardTitle className="text-base">
+              {assinaturasSource === "stripe" ? "Stripe API" : "Fallback Supabase"}
+            </CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Total</CardDescription>
+            <CardTitle className="text-2xl">{subsByState.total}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Ativas / Trial</CardDescription>
+            <CardTitle className="text-2xl">
+              {subsByState.active}
+              <span className="ml-2 text-sm text-muted-foreground">+ {subsByState.trialing}</span>
+            </CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Com risco</CardDescription>
+            <CardTitle className="text-2xl text-destructive">{subsByState.problematic}</CardTitle>
+          </CardHeader>
+        </Card>
+      </div>
+
       {!hasApiUrl() ? (
         <Alert>
           <AlertTitle>Backend opcional</AlertTitle>
@@ -487,7 +592,7 @@ export default function MonetizacaoPage() {
         </div>
       )}
 
-      <Tabs defaultValue="planos" className="w-full">
+      <Tabs defaultValue="assinaturas" className="w-full">
         <TabsList>
           <TabsTrigger value="planos">Planos</TabsTrigger>
           <TabsTrigger value="assinaturas" onClick={() => void loadSubs()}>
@@ -625,65 +730,111 @@ export default function MonetizacaoPage() {
             <CardContent>
               {loadingSubs ? (
                 <p className="text-sm text-muted-foreground">A carregar…</p>
+              ) : subs.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+                  Nenhuma assinatura encontrada para o ambiente atual.
+                </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>ID</TableHead>
-                      <TableHead>Estado</TableHead>
-                      <TableHead>Cliente</TableHead>
-                      <TableHead className="text-right">Ações</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {subs.map((s) => (
-                      <TableRow key={s.id}>
-                        <TableCell className="max-w-[120px] truncate font-mono text-xs">{s.id}</TableCell>
-                        <TableCell>{s.status}</TableCell>
-                        <TableCell className="max-w-[160px] truncate text-xs">
-                          {typeof s.customer === "string"
-                            ? s.customer
-                            : s.customer && typeof s.customer === "object" && "id" in s.customer
-                              ? String((s.customer as { id: string }).id)
-                              : "—"}
-                        </TableCell>
-                        <TableCell className="space-x-1 text-right">
-                          {hasApiUrl() && assinaturasSource === "stripe" ? (
-                            <>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() =>
-                                  subAction(`/api/stripe/admin/subscriptions/${s.id}/cancel`, {
-                                    cancelAtPeriodEnd: true,
-                                  })
-                                }
-                              >
-                                Cancelar no fim
-                              </Button>
-                              <Button
-                                variant="secondary"
-                                size="sm"
-                                onClick={() => subAction(`/api/stripe/admin/subscriptions/${s.id}/pause`)}
-                              >
-                                Pausar
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => subAction(`/api/stripe/admin/subscriptions/${s.id}/resume`)}
-                              >
-                                Retomar
-                              </Button>
-                            </>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
+                <>
+                  <div className="mb-4 flex flex-wrap items-center gap-2">
+                    <Button variant={subscriptionFilter === "all" ? "default" : "outline"} size="sm" onClick={() => setSubscriptionFilter("all")}>
+                      Todas ({subs.length})
+                    </Button>
+                    <Button variant={subscriptionFilter === "active_only" ? "default" : "outline"} size="sm" onClick={() => setSubscriptionFilter("active_only")}>
+                      Ativas operacionais ({subsFiltersCount.activeOnly})
+                    </Button>
+                    <Button variant={subscriptionFilter === "paused" ? "default" : "outline"} size="sm" onClick={() => setSubscriptionFilter("paused")}>
+                      Pausadas ({subsFiltersCount.paused})
+                    </Button>
+                    <Button variant={subscriptionFilter === "canceling" ? "default" : "outline"} size="sm" onClick={() => setSubscriptionFilter("canceling")}>
+                      Cancelamento agendado ({subsFiltersCount.canceling})
+                    </Button>
+                  </div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>ID</TableHead>
+                        <TableHead>Estado</TableHead>
+                        <TableHead>Operação</TableHead>
+                        <TableHead>Cliente</TableHead>
+                        <TableHead>Período até</TableHead>
+                        <TableHead className="text-right">Ações</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredSubs.map((s) => {
+                        const op = subscriptionOperationLabel(s);
+                        const OpIcon = op.icon;
+                        return (
+                          <TableRow key={s.id}>
+                            <TableCell className="max-w-[160px] truncate font-mono text-xs">{shortId(s.id, 20)}</TableCell>
+                            <TableCell>
+                              <Badge variant={statusBadgeVariant(s.status)} className="capitalize">
+                                {s.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={op.variant} className="inline-flex items-center gap-1.5">
+                                <OpIcon size={12} />
+                                {op.label}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="max-w-[160px] truncate text-xs">
+                              {typeof s.customer === "string"
+                                ? shortId(s.customer, 18)
+                                : s.customer && typeof s.customer === "object" && "id" in s.customer
+                                  ? shortId(String((s.customer as { id: string }).id), 18)
+                                  : "—"}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {formatUnixDate(s.current_period_end)}
+                            </TableCell>
+                            <TableCell className="space-x-1 text-right">
+                              {hasApiUrl() && assinaturasSource === "stripe" ? (
+                                <>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={subscriptionActionId === s.id}
+                                    onClick={() =>
+                                      subAction(`/api/stripe/admin/subscriptions/${s.id}/cancel`, {
+                                        cancelAtPeriodEnd: !s.cancel_at_period_end,
+                                        undoCancelAtPeriodEnd: Boolean(s.cancel_at_period_end),
+                                      })
+                                    }
+                                  >
+                                    {s.cancel_at_period_end ? "Remover cancelamento" : "Cancelar no fim"}
+                                  </Button>
+                                  <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    disabled={subscriptionActionId === s.id || Boolean(s.pause_collection)}
+                                    onClick={() => subAction(`/api/stripe/admin/subscriptions/${s.id}/pause`)}
+                                  >
+                                    Pausar
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    disabled={subscriptionActionId === s.id || !s.pause_collection}
+                                    onClick={() => subAction(`/api/stripe/admin/subscriptions/${s.id}/resume`)}
+                                  >
+                                    Retomar
+                                  </Button>
+                                </>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                                  <AlertCircle size={12} />
+                                  Sem ações
+                                </span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </>
               )}
             </CardContent>
           </Card>

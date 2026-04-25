@@ -150,6 +150,12 @@ export default function AdminApiWebhooksPage() {
     });
   };
 
+  const deleteApiKey = (key: ApiKey) => {
+    const confirmed = window.confirm(`Apagar a API key "${key.nome}"? Essa acao nao pode ser desfeita.`);
+    if (!confirmed) return;
+    persist({ ...snap, apiKeys: snap.apiKeys.filter((item) => item.id !== key.id) });
+  };
+
   const addWebhook = () => {
     if (!newWebhookForm.url.trim() || !/^https?:\/\//.test(newWebhookForm.url.trim()) || newWebhookForm.eventos.length === 0) return;
     const nextWebhook: Webhook = {
@@ -229,8 +235,9 @@ export default function AdminApiWebhooksPage() {
               <div key={key.id} className={cn("gm-aw-key-card", key.status === "revogada" && "revogada")}>
                 <div className="gm-aw-key-top">
                   <div><div className="gm-aw-key-name">{key.nome}</div><div className="gm-aw-key-desc">{key.descricao}</div></div>
-                  <div className="gm-aw-key-right">
+                  <div className="gm-aw-key-right gm-aw-wh-actions">
                     <span className={cn("gm-aw-badge", key.status === "ativa" ? "b-ok" : "b-err")}>{key.status === "ativa" ? "Ativa" : "Revogada"}</span>
+                    <button className="gm-aw-btn-sm gm-aw-btn-sm-warn" onClick={() => deleteApiKey(key)}>Apagar</button>
                   </div>
                 </div>
                 <div className="gm-aw-key-value"><span className="gm-aw-key-code">{key.keyMascarada}</span></div>

@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type PropsWithChildren,
 } from "react";
@@ -51,6 +52,7 @@ export function AdminAuthProvider({ children }: PropsWithChildren) {
   const [subscriptionBlocked, setSubscriptionBlocked] = useState(false);
   const [subscriptionBlockReason, setSubscriptionBlockReason] = useState<string | null>(null);
   const [subscriptionGateLoading, setSubscriptionGateLoading] = useState(false);
+  const lastFetchedUserIdRef = useRef<string | null>(null);
 
   const fetchRole = useCallback(async (userId: string | null) => {
     if (!userId) {
@@ -58,9 +60,13 @@ export function AdminAuthProvider({ children }: PropsWithChildren) {
       setEquipeId(null);
       setPerfilNome(null);
       setRoleLoading(false);
+      lastFetchedUserIdRef.current = null;
       return;
     }
-    setRoleLoading(true);
+    if (lastFetchedUserIdRef.current !== userId) {
+      setRoleLoading(true);
+    }
+    lastFetchedUserIdRef.current = userId;
     const first = await supabase.from("perfis").select("role, equipe_id, nome_completo").eq("usuario_id", userId).maybeSingle();
     if (first.error) {
       const msg = first.error.message ?? "";

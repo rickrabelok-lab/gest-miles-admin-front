@@ -15,7 +15,13 @@ import "./index.css";
 import "./styles/admin-master-html.css";
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { staleTime: 60_000, retry: 1 } },
+  defaultOptions: {
+    queries: {
+      staleTime: 60_000,
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+  },
 });
 
 createRoot(document.getElementById("root")!).render(

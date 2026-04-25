@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAccessScope } from "@/hooks/useAccessScope";
@@ -24,6 +25,7 @@ import {
   type ConfiguracaoRow,
 } from "@/lib/adminApi";
 import { canAccessAppConfig } from "@/lib/accessScope";
+import { apiFetch, hasApiUrl } from "@/lib/backendApi";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
@@ -162,7 +164,7 @@ function normalizeNegocioRegras(raw: unknown): NegocioRegrasNegocio {
 
 export default function AdminConfigPage() {
   const { scope } = useAccessScope();
-  const { perfilNome } = useAdminAuth();
+  const { perfilNome, session } = useAdminAuth();
   const { refresh: refreshAppConfig } = useAppConfig();
 
   const [tab, setTab] = useState<CfgTab>("sistema");
@@ -176,6 +178,7 @@ export default function AdminConfigPage() {
   const [showStripeSec, setShowStripeSec] = useState(false);
   const [showStripeWh, setShowStripeWh] = useState(false);
   const [showEmailKey, setShowEmailKey] = useState(false);
+  const [testingStripeConnection, setTestingStripeConnection] = useState(false);
 
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [dragLogo, setDragLogo] = useState(false);
@@ -261,6 +264,49 @@ export default function AdminConfigPage() {
   const fin = getObj<FinanceiroPagamentos>(config, APP_CONFIG_KEYS.FINANCEIRO_PAGAMENTOS, DEFAULT_FIN);
   const notif = getObj<NotificacoesCanais>(config, APP_CONFIG_KEYS.NOTIFICACOES_CANAIS, DEFAULT_NOTIF);
   const integ = getObj<IntegracoesDetalhes>(config, APP_CONFIG_KEYS.INTEGRACOES_DETALHES, DEFAULT_INTEG);
+
+  const testStripeConnection = async () => {
+    const token = session?.access_token;
+    if (!token) {
+      toast.error("Sessão inválida. Entre novamente para testar a conexão.");
+      return;
+    }
+    if (!hasApiUrl()) {
+      toast.error("Backend Stripe não configurado. Defina VITE_API_USE_SAME_ORIGIN=1 e VITE_API_PROXY_TARGET.");
+      return;
+    }
+    if (!fin.stripe_secret_key?.trim()) {
+      toast.error("Preencha a Stripe Secret Key antes de testar.");
+      return;
+    }
+    if (!fin.stripe_webhook_secret?.trim()) {
+      toast.error("Preencha o Stripe Webhook Secret antes de testar.");
+      return;
+    }
+
+    setTestingStripeConnection(true);
+    try {
+      const data = await apiFetch<{ accountId: string; latencyMs: number; mode: "live" | "sandbox" }>(
+        "/api/stripe/admin/connection-test",
+        {
+          method: "POST",
+          token,
+          body: JSON.stringify({
+            secretKey: fin.stripe_secret_key.trim(),
+            webhookSecret: fin.stripe_webhook_secret.trim(),
+            mode: fin.stripe_mode,
+          }),
+        },
+      );
+      toast.success(
+        `Conexão Stripe OK (${data.mode}) • conta ${data.accountId} • ${Math.max(1, data.latencyMs)}ms`,
+      );
+    } catch (e) {
+      toast.error(formatSupabaseError(e));
+    } finally {
+      setTestingStripeConnection(false);
+    }
+  };
   const taxasReadonly = getObj(config, APP_CONFIG_KEYS.FINANCEIRO_TAXAS, { iva_padrao: 0, taxa_servico_pct: 0 });
 
   const stripeConnected = Boolean(fin.stripe_secret_key?.trim());
@@ -833,6 +879,29 @@ export default function AdminConfigPage() {
               <div className="gm-cfg-section-title">
                 <span className="gm-cfg-sec-label">Stripe</span>
               </div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  marginBottom: 12,
+                  padding: "10px 12px",
+                  border: "1px solid var(--bd)",
+                  borderRadius: 12,
+                  background: "#fafafa",
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>Estado da integração</div>
+                  <div style={{ fontSize: 11, color: "var(--t3)" }}>
+                    Use Sandbox para validar; mude para Live apenas após teste completo de webhook.
+                  </div>
+                </div>
+                <Badge variant={fin.stripe_mode === "live" ? "default" : "secondary"}>
+                  {fin.stripe_mode === "live" ? "Live" : "Sandbox"}
+                </Badge>
+              </div>
               <div className="gm-cfg-field" style={{ marginBottom: 12 }}>
                 <label className="gm-cfg-flabel">Stripe Secret Key</label>
                 <div className="gm-cfg-pw-wrap">
@@ -888,11 +957,15 @@ export default function AdminConfigPage() {
               <button
                 type="button"
                 className="btn-outline"
-                style={{ borderColor: "var(--info-bd)", color: "var(--info)", marginTop: 8 }}
-                onClick={() => toast.message("Teste de conexão requer backend seguro com a API Stripe.")}
+                style={{ borderColor: "var(--info-bd)", color: "var(--info)", marginTop: 8, minWidth: 220 }}
+                onClick={() => void testStripeConnection()}
+                disabled={testingStripeConnection}
               >
-                Testar conexão Stripe
+                {testingStripeConnection ? "A testar conexão..." : "Testar conexão Stripe"}
               </button>
+              <p style={{ fontSize: 11, color: "var(--t3)", marginTop: 8 }}>
+                O teste valida a Stripe Secret Key e o formato do Webhook Secret num backend seguro.
+              </p>
             </div>
             <div className="gm-cfg-section gm-cfg-section-bordered">
               <div className="gm-cfg-section-title">

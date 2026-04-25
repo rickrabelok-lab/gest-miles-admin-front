@@ -41,7 +41,15 @@ import CsHomeRedirect from "@/components/CsHomeRedirect";
 import MissingSupabaseConfig from "@/components/MissingSupabaseConfig";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 const App = () => {
   if (!isSupabaseConfigured) {
