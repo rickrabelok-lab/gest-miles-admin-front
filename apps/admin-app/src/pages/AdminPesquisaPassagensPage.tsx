@@ -96,6 +96,7 @@ function defaultsFromRow(row: PesquisaPassagensConfigAdmin | null): {
   destinationImagesJson: string;
   brandAssetsJson: string;
   airlineLogosJson: string;
+  programCardLogosJson: string;
 } {
   if (!row) {
     return {
@@ -113,6 +114,7 @@ function defaultsFromRow(row: PesquisaPassagensConfigAdmin | null): {
       destinationImagesJson: "{}\n",
       brandAssetsJson: "{}\n",
       airlineLogosJson: "{}\n",
+      programCardLogosJson: "{}\n",
     };
   }
   return {
@@ -132,6 +134,9 @@ function defaultsFromRow(row: PesquisaPassagensConfigAdmin | null): {
       : "{}\n",
     brandAssetsJson: Object.keys(row.brand_assets).length ? `${JSON.stringify(row.brand_assets, null, 2)}\n` : "{}\n",
     airlineLogosJson: Object.keys(row.airline_logos).length ? `${JSON.stringify(row.airline_logos, null, 2)}\n` : "{}\n",
+    programCardLogosJson: Object.keys(row.program_card_logos).length
+      ? `${JSON.stringify(row.program_card_logos, null, 2)}\n`
+      : "{}\n",
   };
 }
 
@@ -155,6 +160,7 @@ export default function AdminPesquisaPassagensPage() {
   const [destinationImagesJson, setDestinationImagesJson] = useState("{}\n");
   const [brandAssetsJson, setBrandAssetsJson] = useState("{}\n");
   const [airlineLogosJson, setAirlineLogosJson] = useState("{}\n");
+  const [programCardLogosJson, setProgramCardLogosJson] = useState("{}\n");
 
   const load = useCallback(async () => {
     if (!master) return;
@@ -180,6 +186,7 @@ export default function AdminPesquisaPassagensPage() {
     setDestinationImagesJson(d.destinationImagesJson);
     setBrandAssetsJson(d.brandAssetsJson);
     setAirlineLogosJson(d.airlineLogosJson);
+    setProgramCardLogosJson(d.programCardLogosJson);
     setLoadPending(false);
   }, [master]);
 
@@ -208,6 +215,11 @@ export default function AdminPesquisaPassagensPage() {
       toast.error("JSON de airline_logos inválido.");
       return;
     }
+    const parsedProgramCard = parseImagesJson(programCardLogosJson);
+    if (parsedProgramCard === null) {
+      toast.error("JSON de program_card_logos inválido.");
+      return;
+    }
     const tps = Math.max(1, Math.floor(Number(tokensPerSearch)) || 1);
     setSavePending(true);
     const { error } = await savePesquisaPassagensConfig({
@@ -221,6 +233,7 @@ export default function AdminPesquisaPassagensPage() {
       destination_images: parsedImgs,
       brand_assets: parsedBrand,
       airline_logos: parsedAirline,
+      program_card_logos: parsedProgramCard,
       tokens_per_search: tps,
       monthly_token_allowance_user: parseOptionalInt(monthlyTokensUser),
       monthly_token_allowance_equipe: parseOptionalInt(monthlyTokensEquipe),
@@ -395,8 +408,10 @@ export default function AdminPesquisaPassagensPage() {
             <CardDescription>
               Preferível usar a página <strong>Marca e imagens</strong> no menu para upload. Aqui pode editar o JSON
               bruto: <code className="text-xs">brand_assets</code> (ex. <code className="text-xs">rail_logo</code>,{" "}
-              <code className="text-xs">rail_wordmark</code>) e <code className="text-xs">airline_logos</code> (ex.{" "}
-              <code className="text-xs">smiles</code>, <code className="text-xs">latam</code>).
+              <code className="text-xs">rail_wordmark</code>) e               <code className="text-xs">airline_logos</code> (ex.{" "}
+              <code className="text-xs">smiles</code>, <code className="text-xs">latam</code>) e{" "}
+              <code className="text-xs">program_card_logos</code> (chaves = <code className="text-xs">program_id</code> no
+              Gestor, ex. <code className="text-xs">livelo</code>, <code className="text-xs">latam-pass</code>).
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
@@ -420,6 +435,17 @@ export default function AdminPesquisaPassagensPage() {
                 onChange={(e) => setAirlineLogosJson(e.target.value)}
                 spellCheck={false}
                 aria-label="airline_logos JSON"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pp-pc">program_card_logos</Label>
+              <textarea
+                id="pp-pc"
+                className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex min-h-[120px] w-full rounded-md border px-3 py-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+                value={programCardLogosJson}
+                onChange={(e) => setProgramCardLogosJson(e.target.value)}
+                spellCheck={false}
+                aria-label="program_card_logos JSON"
               />
             </div>
           </CardContent>

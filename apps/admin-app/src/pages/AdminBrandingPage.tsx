@@ -37,6 +37,21 @@ const BRAND_ASSET_KEYS: Array<{ key: string; label: string }> = [
 ];
 
 /** Chaves alinhadas aos mocks do Gestor Miles (`destination_images`). */
+/** Chaves = `program_id` no Gestor Miles (cartão «Meus programas»). */
+const PROGRAM_CARD_LOGO_OPTIONS: Array<{ programId: string; label: string }> = [
+  { programId: "livelo", label: "Livelo" },
+  { programId: "esfera", label: "Esfera" },
+  { programId: "smiles", label: "Smiles" },
+  { programId: "latam-pass", label: "LATAM Pass" },
+  { programId: "tudo-azul", label: "Tudo Azul" },
+  { programId: "iberia", label: "Ibéria" },
+  { programId: "copa-airlines", label: "Copa Airlines" },
+  { programId: "finnair", label: "Finnair" },
+  { programId: "qatar-airways", label: "Qatar Airways" },
+  { programId: "british-airways", label: "British Airways" },
+  { programId: "coopera", label: "Coopera" },
+];
+
 const DESTINATION_SLUGS: Array<{ slug: string; label: string }> = [
   { slug: "nordeste", label: "Nordeste — capa do cartão (pesquisa por destino)" },
   { slug: "norte", label: "Norte — capa do cartão (pesquisa por destino)" },
@@ -70,6 +85,7 @@ export default function AdminBrandingPage() {
   const [draftBrand, setDraftBrand] = useState<Record<string, string>>({});
   const [draftAirline, setDraftAirline] = useState<Record<string, string>>({});
   const [draftDest, setDraftDest] = useState<Record<string, string>>({});
+  const [draftProgramCard, setDraftProgramCard] = useState<Record<string, string>>({});
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -85,6 +101,7 @@ export default function AdminBrandingPage() {
     setDraftBrand({ ...(data?.brand_assets ?? {}) });
     setDraftAirline({ ...(data?.airline_logos ?? {}) });
     setDraftDest({ ...(data?.destination_images ?? {}) });
+    setDraftProgramCard({ ...(data?.program_card_logos ?? {}) });
     setLoadPending(false);
   }, [master]);
 
@@ -106,7 +123,7 @@ export default function AdminBrandingPage() {
 
   async function handleUpload(
     e: ChangeEvent<HTMLInputElement>,
-    slot: { type: "brand" | "airline" | "destination"; key: string },
+    slot: { type: "brand" | "airline" | "destination" | "programCard"; key: string },
   ) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -124,6 +141,7 @@ export default function AdminBrandingPage() {
       if (slot.type === "brand") setDraftBrand((p) => ({ ...p, [slot.key]: url }));
       if (slot.type === "airline") setDraftAirline((p) => ({ ...p, [slot.key]: url }));
       if (slot.type === "destination") setDraftDest((p) => ({ ...p, [slot.key]: url }));
+      if (slot.type === "programCard") setDraftProgramCard((p) => ({ ...p, [slot.key]: url }));
       toast.success("Upload concluído. Não se esqueça de guardar.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha no upload.");
@@ -143,6 +161,7 @@ export default function AdminBrandingPage() {
       destination_images: draftDest,
       brand_assets: draftBrand,
       airline_logos: draftAirline,
+      program_card_logos: draftProgramCard,
       updated_by: user.id,
     });
     setSavePending(false);
@@ -178,7 +197,9 @@ export default function AdminBrandingPage() {
         <p className="mt-2 text-xs text-slate-500">
           Nota técnica (só se precisar de suporte): ficheiros no armazenamento{" "}
           <code className="rounded bg-slate-100 px-1">branding-assets</code>, configuração em{" "}
-          <code className="rounded bg-slate-100 px-1">pesquisa_passagens_config</code> — requer migração SQL já aplicada no Supabase.
+          <code className="rounded bg-slate-100 px-1">pesquisa_passagens_config</code> (coluna{" "}
+          <code className="rounded bg-slate-100 px-1">program_card_logos</code> para os cartões «Meus programas») — executar o SQL do repositório se
+          a coluna ainda não existir.
         </p>
       </div>
 
@@ -206,6 +227,38 @@ export default function AdminBrandingPage() {
                   onChange={(e) => void handleUpload(e, { type: "brand", key: entry.key })}
                 />
                 {uploadingKey === `brand:${entry.key}` ? (
+                  <p className="text-xs text-slate-500">A enviar…</p>
+                ) : null}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Imagens dos programas (cartão «Meus programas»)</CardTitle>
+            <CardDescription>
+              Círculo com a imagem de cada programa na grelha inicial do Gestor Miles. Se o utilizador escolher outra foto
+              no cartão, essa preferência local prevalece. Chaves estáveis:{" "}
+              <code className="text-xs">livelo</code>, <code className="text-xs">latam-pass</code>, etc.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-2">
+            {PROGRAM_CARD_LOGO_OPTIONS.map((entry) => (
+              <div key={entry.programId} className="space-y-2">
+                <Label htmlFor={`pc-${entry.programId}`}>{entry.label}</Label>
+                <Input
+                  id={`pc-${entry.programId}`}
+                  value={draftProgramCard[entry.programId] ?? ""}
+                  onChange={(e) => setDraftProgramCard((p) => ({ ...p, [entry.programId]: e.target.value }))}
+                  placeholder="https://…"
+                />
+                <Input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  onChange={(e) => void handleUpload(e, { type: "programCard", key: entry.programId })}
+                />
+                {uploadingKey === `programCard:${entry.programId}` ? (
                   <p className="text-xs text-slate-500">A enviar…</p>
                 ) : null}
               </div>

@@ -21,6 +21,11 @@ export interface PesquisaPassagensConfigAdmin {
   brand_assets: Record<string, string>;
   /** Logos por programa: smiles, tudoazul, latam, tap, aa. */
   airline_logos: Record<string, string>;
+  /**
+   * Logos globais por `program_id` (livelo, latam-pass, …) — círculo do cartão em «Meus programas».
+   * Sobrescreve iniciais quando o cliente/gestor não definiu outra imagem.
+   */
+  program_card_logos: Record<string, string>;
   tokens_per_search: number;
   monthly_token_allowance_user: number | null;
   monthly_token_allowance_equipe: number | null;
@@ -59,6 +64,7 @@ function parseRow(raw: Record<string, unknown>): PesquisaPassagensConfigAdmin {
       dest && typeof dest === "object" && !Array.isArray(dest) ? (dest as Record<string, string>) : {},
     brand_assets: parseJsonObjectStringMap(raw.brand_assets),
     airline_logos: parseJsonObjectStringMap(raw.airline_logos),
+    program_card_logos: parseJsonObjectStringMap(raw.program_card_logos),
     tokens_per_search:
       raw.tokens_per_search == null || raw.tokens_per_search === ""
         ? 1
@@ -96,6 +102,7 @@ export async function fetchPesquisaPassagensConfig(): Promise<{
         destination_images: {},
         brand_assets: {},
         airline_logos: {},
+        program_card_logos: {},
         tokens_per_search: 1,
         monthly_token_allowance_user: null,
         monthly_token_allowance_equipe: null,
@@ -114,6 +121,7 @@ export async function updatePesquisaPassagensBrandingAssets(input: {
   destination_images: Record<string, string>;
   brand_assets: Record<string, string>;
   airline_logos: Record<string, string>;
+  program_card_logos: Record<string, string>;
   updated_by: string | null;
 }): Promise<{ error: string | null }> {
   const { error } = await supabase
@@ -122,6 +130,7 @@ export async function updatePesquisaPassagensBrandingAssets(input: {
       destination_images: input.destination_images,
       brand_assets: input.brand_assets,
       airline_logos: input.airline_logos,
+      program_card_logos: input.program_card_logos,
       updated_at: new Date().toISOString(),
       updated_by: input.updated_by,
     })
@@ -140,6 +149,7 @@ export async function savePesquisaPassagensConfig(input: {
   destination_images: Record<string, string>;
   brand_assets: Record<string, string>;
   airline_logos: Record<string, string>;
+  program_card_logos: Record<string, string>;
   tokens_per_search: number;
   monthly_token_allowance_user: number | null;
   monthly_token_allowance_equipe: number | null;
@@ -160,6 +170,7 @@ export async function savePesquisaPassagensConfig(input: {
       destination_images: input.destination_images,
       brand_assets: input.brand_assets,
       airline_logos: input.airline_logos,
+      program_card_logos: input.program_card_logos,
       tokens_per_search: Math.max(1, input.tokens_per_search),
       plan_limits: input.plan_limits,
       updated_at: new Date().toISOString(),
